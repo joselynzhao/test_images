@@ -137,3 +137,5 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 /output/
+/car_model.pkl
+/real_test_images/
