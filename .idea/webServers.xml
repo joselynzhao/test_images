@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="42169628-ba2c-4db8-b20d-ce15415c289d" name="hpcl">
+        <fileTransfer accessType="SFTP" host="172.20.208.155" port="22" sshConfigId="ca67d700-c870-429c-8426-97343242e498" sshConfig="zhaojing">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
