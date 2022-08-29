@@ -216,8 +216,8 @@ def main(data, outdir, g_ckpt, e_ckpt,
         # match_64 = G.synthesis.U.match_c3
     # params += list(match_32.parameters())
     # params += list(match_64.parameters())
-    fg_emb = G.synthesis.fg_nerf.my_emb1
-    bg_emb = G.synthesis.bg_nerf.my_emb1
+    fg_emb = G.synthesis.fg_nerf.My_embding
+    bg_emb = G.synthesis.bg_nerf.My_embding
     params+=list(fg_emb.parameters())
     params+=list(bg_emb.parameters())
     E_optim = optim.Adam(params, lr=lr, betas=(0.9, 0.99))

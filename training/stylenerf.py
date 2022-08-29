@@ -274,7 +274,7 @@ class NeRFBlock(nn.Module):
             self.num_ws  = 0
             
         else:
-            self.my_emb1 = nn.Conv2d(dim_embed+256, dim_embed, 1, bias=False)
+            self.My_embding = Embding_handle(dim_embed)
             self.fc_in  = Style2Layer(dim_embed, self.hidden_size, w_dim, activation=self.activation)
             # self.fc_in_my  = Style2Layer(dim_embed+256, self.hidden_size,w_dim,activation=self.activation)
             self.num_ws = 1
@@ -367,7 +367,7 @@ class NeRFBlock(nn.Module):
         c_feature = c_feature.repeat(1,n_steps,1,1,1)
         p = torch.cat((p,c_feature),2)
         p = rearrange(p, 'b s c h w -> (b s) c h w')
-        p = self.my_emb1(p)
+        p = self.My_embding(p)
 
 
         # c_feature=None
@@ -2472,6 +2472,22 @@ class CameraQueriedSampler(torch.utils.data.Sampler):
                 for i in range(self.B):
                     rand_idx = rnd.randint(self.K)
                     yield knn_idxs[rand_idx, i].item()
+
+class Embding_handle(nn.Module):
+    def __init__(self,dim):
+        super().__init__()
+        self.emb1 =nn.Conv2d(dim+256, dim+128, 1, bias=False)
+        self.emb2 =nn.Conv2d(dim+128, dim+64, 1, bias=False)
+        self.emb3 =nn.Conv2d(dim+64, dim, 1, bias=False)
+        self.relu = nn.ReLU()
+        self.tanh = nn.Tanh()
+        self.sig = nn.Sigmoid()
+    def forward(self, x):
+        x = self.emb1(x)
+        x = self.emb2(x)
+        x = self.emb3(x)
+        x = self.relu(x)
+        return x
 
 
 #Attentive transformer with dropout-based annealing
