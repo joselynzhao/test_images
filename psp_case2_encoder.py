@@ -143,6 +143,7 @@ def cleanup():
 @click.option("--tensorboard", type=bool, default=True)
 @click.option("--outdir", type=str, required=True)
 @click.option("--resume", type=bool, default=False)  # true则进行resume
+@click.option("--insert_layer", type=int, default=2)  # true则进行resume
 # def main(data, outdir, g_ckpt, e_ckpt,
 #          max_steps, batch, lr, local_rank, lambda_w,
 #          lambda_img, adv, tensorboard):
@@ -155,7 +156,7 @@ def cleanup():
 
 def main(data, outdir, g_ckpt, e_ckpt,
              max_steps, batch, lr,local_rank, lambda_w,lambda_c,
-             lambda_img,lambda_l2, which_c,adv, tensorboard,resume):
+             lambda_img,lambda_l2, which_c,adv, tensorboard,resume,insert_layer):
     # local_rank = rank
     # setup(rank, word_size)
 
@@ -216,8 +217,8 @@ def main(data, outdir, g_ckpt, e_ckpt,
         # match_64 = G.synthesis.U.match_c3
     # params += list(match_32.parameters())
     # params += list(match_64.parameters())
-    fg_emb = G.synthesis.fg_nerf.My_embding
-    bg_emb = G.synthesis.bg_nerf.My_embding
+    fg_emb = G.synthesis.fg_nerf.My_embding_fg
+    bg_emb = G.synthesis.bg_nerf.My_embding_bg
     params+=list(fg_emb.parameters())
     params+=list(bg_emb.parameters())
     E_optim = optim.Adam(params, lr=lr, betas=(0.9, 0.99))
@@ -287,7 +288,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
         rec_ws_1, c1= E(img_1,which_c=which_c)
         # ws_avg = ws_avg.repeat(rec_ws_1.shape[0],1,1)  # zj 这个地方和之前得不一样，以前是不是也需要这样处理呢。
         rec_ws_1 +=ws_avg
-        gen_img1 = G.get_final_output(styles=rec_ws_1, camera_matrices=camera1,img_c=(which_c,c1))
+        gen_img1 = G.get_final_output(styles=rec_ws_1, camera_matrices=camera1,img_c=(which_c,c1,insert_layer))
 
         # define loss
         loss_dict['img1_lpips'] = loss_fn_alex(gen_img1.cpu(), img_1.cpu()).mean().to(device) * lambda_img

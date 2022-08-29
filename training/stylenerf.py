@@ -274,7 +274,8 @@ class NeRFBlock(nn.Module):
             self.num_ws  = 0
             
         else:
-            self.My_embding = Embding_handle(dim_embed)
+            self.My_embding_fg = Embding_handle(128)
+            self.My_embding_bg = Embding_handle(64)
             self.fc_in  = Style2Layer(dim_embed, self.hidden_size, w_dim, activation=self.activation)
             # self.fc_in_my  = Style2Layer(dim_embed+256, self.hidden_size,w_dim,activation=self.activation)
             self.num_ws = 1
@@ -362,13 +363,6 @@ class NeRFBlock(nn.Module):
             z_shape = repeat(z_shape, 'b c -> (b s) h w c', h=height, w=width, s=n_steps)
             p = torch.cat([p, z_shape], -1)
         p = p.permute(0,3,1,2)    # BS x C x H x W
-        p = rearrange(p,'(b s) c h w -> b s c h w', s=n_steps)
-        c_feature = c_feature.unsqueeze(dim=1)
-        c_feature = c_feature.repeat(1,n_steps,1,1,1)
-        p = torch.cat((p,c_feature),2)
-        p = rearrange(p, 'b s c h w -> (b s) c h w')
-        p = self.My_embding(p)
-
 
         # c_feature=None
         # if c_feature is not None:
@@ -380,12 +374,26 @@ class NeRFBlock(nn.Module):
 
         net = self.fc_in(p, ws[:, 0] if ws is not None else None)  # 64， 128，32，32
         # net = p
+        if c_feature is not None:
+            _,c_feature,insert_layer = c_feature
+        else:
+            insert_layer=-1
         if self.n_blocks > 1:
             for idx, layer in enumerate(self.blocks):
                 ws_i = ws[:, idx + 1] if ws is not None else None
                 if (self.skip_layer is not None) and (idx == self.skip_layer):
                     net = torch.cat([net, p], 1)
                 net = layer(net, ws_i, up=1)
+                if idx == insert_layer-1: # 第二层之后
+                    p = rearrange(net, '(b s) c h w -> b s c h w', s=n_steps)
+                    c_feature = c_feature.unsqueeze(dim=1)
+                    c_feature = c_feature.repeat(1, n_steps, 1, 1, 1)
+                    p = torch.cat((p, c_feature), 2)
+                    p = rearrange(p, 'b s c h w -> (b s) c h w')
+                    if n_steps == 4:
+                        net = self.My_embding_bg(p)
+                    else:
+                        net = self.My_embding_fg(p)
 
         # forward to get the final results
         w_idx = self.n_blocks  # fc_in, self.blocks
@@ -1105,16 +1113,18 @@ class VolumeRenderer(object):
         else: 
             # standard volume rendering
             if 'img_c' in unused:
-                _,c_feature = unused['img_c']
-                c_feature = c_feature*0.1
+                img_c = unused['img_c']
+            else:
+                img_c = None
+                # c_feature = c_feature*0.1
             if not only_render_background:
                 output = self.forward_rendering(  # 前景
-                    H, output, fg_nerf, nerf_input_cams, nerf_input_feats, latent_codes, styles,c_feature=c_feature)
+                    H, output, fg_nerf, nerf_input_cams, nerf_input_feats, latent_codes, styles,c_feature=img_c)
                 
             # background rendering (NeRF++)
             if (not not_render_background) and (not self.no_background):
                 output = self.forward_rendering_background(  # 背景
-                    H, output, bg_nerf, nerf_input_cams, latent_codes, styles_bg,c_feature=c_feature)
+                    H, output, bg_nerf, nerf_input_cams, latent_codes, styles_bg,c_feature=img_c)
                          
         if ('early' in render_option) and ('value' not in render_option):
             return self.gen_optional_output(
