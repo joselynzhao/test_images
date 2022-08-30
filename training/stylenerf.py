@@ -276,6 +276,8 @@ class NeRFBlock(nn.Module):
         else:
             self.My_embding_fg = Embding_handle(128)
             self.My_embding_bg = Embding_handle(64)
+            self.MatchConv_fg = MatchConv(256,128)
+            self.MatchConv_bg = MatchConv(256,64)
             self.fc_in  = Style2Layer(dim_embed, self.hidden_size, w_dim, activation=self.activation)
             # self.fc_in_my  = Style2Layer(dim_embed+256, self.hidden_size,w_dim,activation=self.activation)
             self.num_ws = 1
@@ -378,6 +380,7 @@ class NeRFBlock(nn.Module):
             _,c_feature,insert_layer = c_feature
         else:
             insert_layer=-1
+        match = 1
         if self.n_blocks > 1:
             for idx, layer in enumerate(self.blocks):
                 ws_i = ws[:, idx + 1] if ws is not None else None
@@ -385,23 +388,34 @@ class NeRFBlock(nn.Module):
                     net = torch.cat([net, p], 1)
                 net = layer(net, ws_i, up=1)
                 if idx == insert_layer-1: # 第二层之后
-                    p = rearrange(net, '(b s) c h w -> b s c h w', s=n_steps)
-                    c_feature = c_feature.unsqueeze(dim=1)
-                    c_feature = c_feature.repeat(1, n_steps, 1, 1, 1)
-                    p = torch.cat((p, c_feature), 2)
-                    p = rearrange(p, 'b s c h w -> (b s) c h w')
-                    if n_steps == 4:
-                        net = self.My_embding_bg(p)
-                    else:
-                        net = self.My_embding_fg(p)
+                    if not match:
+                        p = rearrange(net, '(b s) c h w -> b s c h w', s=n_steps)
+                        c_feature = c_feature.unsqueeze(dim=1)
+                        c_feature = c_feature.repeat(1, n_steps, 1, 1, 1)
+                        p = torch.cat((p, c_feature), 2)
+                        p = rearrange(p, 'b s c h w -> (b s) c h w')
+                        if n_steps == 4:
+                            net = self.My_embding_bg(p)
+                        else:
+                            net = self.My_embding_fg(p)
+                    else: # match
+                        c_feature = c_feature.unsqueeze(dim=1)
+                        c_feature = c_feature.repeat(1, n_steps, 1, 1, 1)
+                        c_feature = rearrange(c_feature,'b s c h w -> (b s) c h w')
+                        if n_steps == 4:
+                            net = self.MatchConv_bg(c_feature, net)
+                        else:
+                            net = self.MatchConv_fg(c_feature, net)
+
+
 
         # forward to get the final results
         w_idx = self.n_blocks  # fc_in, self.blocks
                 
         feat_inputs = [net]
         if not (self.merge_sigma_feat or self.no_sigma):
-            ws_i      = ws[:, w_idx] if ws is not None else None
-            sigma_out = self.sigma_out(net, ws_i)
+            ws_i      = ws[:, w_idx] if ws is not None else None  # 取第8的一个
+            sigma_out = self.sigma_out(net, ws_i)  # 64，1，32，32
             if use_normal:
                 gradients, = grad(
                     outputs=sigma_out, inputs=p_in, 
@@ -411,14 +425,14 @@ class NeRFBlock(nn.Module):
     
         ws_i = ws[:, -1] if ws is not None else None
         net = torch.cat(feat_inputs, 1) if len(feat_inputs) > 1 else net
-        feat_out = self.feat_out(net, ws_i)  # this is used for lowres output
+        feat_out = self.feat_out(net, ws_i)  # this is used for lowres output  64，256，32，32
 
         if self.merge_sigma_feat:  # split sigma from the feature
             sigma_out, feat_out = feat_out[:, :self.shuffle_factor], feat_out[:, self.shuffle_factor:]
         elif self.no_sigma:
             sigma_out = None
                 
-        if self.predict_rgb:
+        if self.predict_rgb:  #this way
             if self.use_viewdirs and ray_d is not None:
                 ray_d = ray_d / torch.norm(ray_d, dim=-1, keepdim=True)
                 ray_d = self.transform_points(ray_d, views=True)
@@ -428,7 +442,7 @@ class NeRFBlock(nn.Module):
                 feat_ray = self.from_ray(ray_d)
                 rgb = self.to_rgb(F.leaky_relu(feat_out + feat_ray))
             else:
-                rgb = self.to_rgb(feat_out)
+                rgb = self.to_rgb(feat_out)  #64,3,32,32
 
             if self.final_sigmoid_act:
                 rgb = torch.sigmoid(rgb)    
@@ -440,7 +454,7 @@ class NeRFBlock(nn.Module):
         if feat_out.ndim == 2:  # mlp mode
             sigma_out = rearrange(sigma_out, '(b s) d -> b s d', s=n_steps) if sigma_out is not None else None
             feat_out  = rearrange(feat_out,  '(b s) d -> b s d', s=n_steps)
-        else:
+        else: # ndim=4
             sigma_out = rearrange(sigma_out, '(b s) d h w -> b (h w s) d', s=n_steps) if sigma_out is not None else None
             feat_out  = rearrange(feat_out,  '(b s) d h w -> b (h w s) d', s=n_steps)
         return feat_out, sigma_out
@@ -927,12 +941,12 @@ class VolumeRenderer(object):
             p_i = self.I.query_input_features(p_i, nerf_input_feats, fg_shape, bound)
 
         feat, sigma_raw = fg_nerf(p_i, r_i, z_shape_obj, z_app_obj, ws=styles, shape=fg_shape,c_feature=c_feature)
-        feat = rearrange(feat, 'b (n s) d -> b n s d', s=H.n_steps)
-        sigma_raw = rearrange(sigma_raw.squeeze(-1), 'b (n s) -> b n s', s=H.n_steps) 
-        sigma = self.get_density(sigma_raw, fg_nerf, training=H.training)         
+        feat = rearrange(feat, 'b (n s) d -> b n s d', s=H.n_steps)  # 4 1023 16 259
+        sigma_raw = rearrange(sigma_raw.squeeze(-1), 'b (n s) -> b n s', s=H.n_steps)  #  4 1024 16
+        sigma = self.get_density(sigma_raw, fg_nerf, training=H.training)      # #  4 1024 16
         fg_weights, bg_lambda = self.C.calc_volume_weights(
             sigma, di if self.C.dists_normalized else di_trs,  # use real dists for computing weights
-            ray_vector, last_dist=0 if not H.fg_inf_depth else 1e10)[:2]
+            ray_vector, last_dist=0 if not H.fg_inf_depth else 1e10)[:2]  # 4,1024,16  .  4. 1024
 
         if self.hierarchical and (not H.get('disable_hierarchical', False)):
             with torch.no_grad():
