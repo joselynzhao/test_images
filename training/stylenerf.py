@@ -274,10 +274,12 @@ class NeRFBlock(nn.Module):
             self.num_ws  = 0
             
         else:
-            self.My_embding_fg = Embding_handle(128)
-            self.My_embding_bg = Embding_handle(64)
+            self.My_embedding_fg = Embedding_handle(128)
+            self.My_embedding_bg = Embedding_handle(64)
+            self.My_embedding = Embedding_handle(dim_embed)
             self.MatchConv_fg = MatchConv(256,128)
             self.MatchConv_bg = MatchConv(256,64)
+            self.MatchConv = MatchConv(256,dim_embed)
             self.fc_in  = Style2Layer(dim_embed, self.hidden_size, w_dim, activation=self.activation)
             # self.fc_in_my  = Style2Layer(dim_embed+256, self.hidden_size,w_dim,activation=self.activation)
             self.num_ws = 1
@@ -366,43 +368,68 @@ class NeRFBlock(nn.Module):
             p = torch.cat([p, z_shape], -1)
         p = p.permute(0,3,1,2)    # BS x C x H x W
 
-        # c_feature=None
-        # if c_feature is not None:
-        #     c_feature = c_feature.repeat(n_steps,1,1,1)
-        #     p = torch.cat((p,c_feature),1)
-        #     p = self.my_emb1(p)
+        if c_feature is not None:
+            _,c_feature,insert_layer,match,in_net = c_feature
+            c_feature = c_feature *0.1
+            #  match   控制是否采用matchConv的合并实行，为0则 使用embeding的方式。
+            #  in_net  控制合并位置是在net之前还是在net中间，为0则在net之前。
+        else:
+            insert_layer=-1
+            c_feature = None
+
+
+        if c_feature is not None and not in_net:
+            if match:
+                c_feature = c_feature.unsqueeze(dim=1)
+                c_feature = c_feature.repeat(1, n_steps, 1, 1, 1)
+                c_feature = rearrange(c_feature,'b s c h w -> (b s) c h w')
+                p = self.MatchConv(c_feature, p)
+                # if n_steps == 4:
+                #     p = self.MatchConv_bg(c_feature, p)
+                # else:
+                #     p = self.MatchConv_fg(c_feature, p)
+            else:  # embding
+                p = rearrange(p, '(b s) c h w -> b s c h w', s=n_steps)
+                c_feature = c_feature.unsqueeze(dim=1)
+                c_feature = c_feature.repeat(1, n_steps, 1, 1, 1)
+                p = torch.cat((p, c_feature), 2)
+                p = rearrange(p, 'b s c h w -> (b s) c h w')
+                p = self.My_embedding(p)
+                # if n_steps == 4:
+                #     p = self.My_embding_bg(p)
+                # else:
+                #     p = self.My_embding_fg(p)
+
+
+
         if height == width == 1:  # MLP
             p = p.squeeze(-1).squeeze(-1)
 
         net = self.fc_in(p, ws[:, 0] if ws is not None else None)  # 64， 128，32，32
-        # net = p
-        if c_feature is not None:
-            _,c_feature,insert_layer = c_feature
-        else:
-            insert_layer=-1
-        match = 1
+
+
         if self.n_blocks > 1:
             for idx, layer in enumerate(self.blocks):
                 ws_i = ws[:, idx + 1] if ws is not None else None
                 if (self.skip_layer is not None) and (idx == self.skip_layer):
                     net = torch.cat([net, p], 1)
                 net = layer(net, ws_i, up=1)
-                if idx == insert_layer-1: # 第二层之后
+                if idx == insert_layer-1 and in_net: # insert_layer=2则在第二层之后
                     if not match:
                         p = rearrange(net, '(b s) c h w -> b s c h w', s=n_steps)
                         c_feature = c_feature.unsqueeze(dim=1)
                         c_feature = c_feature.repeat(1, n_steps, 1, 1, 1)
                         p = torch.cat((p, c_feature), 2)
                         p = rearrange(p, 'b s c h w -> (b s) c h w')
-                        if n_steps == 4:
-                            net = self.My_embding_bg(p)
+                        if n_steps == 4:  # 用来判断为bg net
+                            net = self.My_embedding_bg(p)
                         else:
-                            net = self.My_embding_fg(p)
+                            net = self.My_embedding_fg(p)
                     else: # match
                         c_feature = c_feature.unsqueeze(dim=1)
                         c_feature = c_feature.repeat(1, n_steps, 1, 1, 1)
                         c_feature = rearrange(c_feature,'b s c h w -> (b s) c h w')
-                        if n_steps == 4:
+                        if n_steps == 4: # 用来判断为bg net
                             net = self.MatchConv_bg(c_feature, net)
                         else:
                             net = self.MatchConv_fg(c_feature, net)
@@ -916,27 +943,6 @@ class VolumeRenderer(object):
         di_trs = self.C.get_transformed_depth(di)
         p_i, r_i = self.C.get_evaluation_points(pixels_world, camera_world, di_trs)
 
-        # 考虑在此处对p_i 进行处理
-        # if c_feature is not None:
-        #     new_pi = rearrange(p_i, 'b (n h w) c -> b n c h w',n=H.n_steps,h=height)
-        #     # new_pi =p_i.reshape(H.batch_size,H.n_steps,-1,height,width)
-        #     c_feature = c_feature.unsqueeze(dim=1)
-        #     c_feature = c_feature.repeat(1,H.n_steps,1,1,1)
-        #     new_pi = torch.cat((new_pi, c_feature), 2)  # 3+256
-        #     new_pi = rearrange(new_pi, 'b n c h w -> (b n) c h w')
-        #     new_pi = self.embding1(new_pi)
-        #     new_pi = self.embding2(new_pi)  # 64,3,32,32
-        #     p_i = rearrange(new_pi, '(b n) c h w -> b (n h w) c', b=H.batch_size)
-
-            # print(torch.max(new_pi,dim=-1)[0].mean())
-            # print(torch.min(new_pi,dim=-1)[0].mean())
-            # c_feature = c_feature*0.1
-            # print(torch.max(c_feature,dim=-1)[0].mean())
-            # print(torch.min(c_feature,dim=-1)[0].mean())
-
-            # p_i = new_pi.reshape(H.batch_size,-1,deep_pi)
-        # c_feature = c_feature * 0.1
-
         if nerf_input_feats is not None:
             p_i = self.I.query_input_features(p_i, nerf_input_feats, fg_shape, bound)
 
@@ -1000,32 +1006,6 @@ class VolumeRenderer(object):
         if (H.training and (not H.get('disable_noise', False))) or H.get('force_noise', False):
             di = self.C.add_noise_to_interval(di)
         p_bg, r_bg = self.C.get_evaluation_points_bg(pixels_world, camera_world, -di)
-
-        # 考虑在此处对p_i 进行处理
-        # if c_feature is not None:
-        #     new_pi = rearrange(p_bg, 'b (n h w) c -> b n c h w', n=H.n_bg_steps, h=height)
-        #     # new_pi =p_i.reshape(H.batch_size,H.n_steps,-1,height,width)
-        #     c_feature = c_feature.unsqueeze(dim=1)
-        #     c_feature = c_feature.repeat(1, H.n_bg_steps, 1, 1, 1)
-        #     # c_feature = c_feature[:,:,:,:,0:width]
-        #     new_pi = torch.cat((new_pi, c_feature), 2)  # 3+256
-        #     new_pi = rearrange(new_pi, 'b n c h w -> (b n) c h w')
-        #     new_pi = self.embding3(new_pi)
-        #     new_pi = self.embding4(new_pi)  # 64,3,32,32
-        #     p_bg = rearrange(new_pi, '(b n) c h w -> b (n h w) c', b=H.batch_size)
-
-            # deep_pi = p_bg.size()[-1]
-            # new_pi = p_bg.reshape(H.batch_size, -1, height, width)
-            # print(torch.max(new_pi, dim=-1)[0].mean())
-            # print(torch.min(new_pi, dim=-1)[0].mean())
-            # c_feature = c_feature * 0.1
-            # print(torch.max(c_feature, dim=-1)[0].mean())
-            # print(torch.min(c_feature, dim=-1)[0].mean())
-            # new_pi = torch.cat((new_pi, c_feature), 1)
-            # new_pi = self.embding3(new_pi)
-            # new_pi = self.embding4(new_pi)
-            # p_bg = new_pi.reshape(H.batch_size, -1, deep_pi)
-        # c_feature = c_feature * 0.1
 
         feat, sigma_raw = bg_nerf(p_bg, r_bg, z_shape_bg, z_app_bg, ws=styles_bg, shape=bg_shape,c_feature=c_feature)
         feat      = rearrange(feat, 'b (n s) d -> b n s d', s=H.n_bg_steps)
@@ -1131,6 +1111,8 @@ class VolumeRenderer(object):
             else:
                 img_c = None
                 # c_feature = c_feature*0.1
+
+            # img_c=None
             if not only_render_background:
                 output = self.forward_rendering(  # 前景
                     H, output, fg_nerf, nerf_input_cams, nerf_input_feats, latent_codes, styles,c_feature=img_c)
@@ -1713,9 +1695,9 @@ class NeRFSynthesisNetwork(torch.nn.Module):
         # ---------------------------------- Initialize Modules ---------------------------------------- -#
         # camera module
         self.C = CameraRay(camera_kwargs, **block_kwargs)
-        # self.match_c1 = MatchConv(128,256)
-        # self.match_c2 = MatchConv(256,256)
-        # self.match_c3 = MatchConv(512,256)
+        self.match_c1 = MatchConv(128,256)
+        self.match_c2 = MatchConv(256,256)
+        self.match_c3 = MatchConv(512,256)
 
         #
         # input encoding module
@@ -1963,7 +1945,7 @@ class NeRFSynthesisNetwork(torch.nn.Module):
 
         # # 在这个地方对image进行处理
         # if 'img_c' in block_kwargs:
-        #     c_name,c = block_kwargs['img_c']
+        #     c_name,c,_ = block_kwargs['img_c']
         #     if c_name=='c1':
         #         x = self.match_c1(c,x)
         #     elif c_name =='c2':
@@ -2497,7 +2479,7 @@ class CameraQueriedSampler(torch.utils.data.Sampler):
                     rand_idx = rnd.randint(self.K)
                     yield knn_idxs[rand_idx, i].item()
 
-class Embding_handle(nn.Module):
+class Embedding_handle(nn.Module):
     def __init__(self,dim):
         super().__init__()
         self.emb1 =nn.Conv2d(dim+256, dim+128, 1, bias=False)
@@ -2573,7 +2555,7 @@ class MatchConv(nn.Module):
         sim = self.soft(self.mynorm(torch.bmm(x2.reshape((n,c,-1)).permute(0,2,1),x1.reshape((n,c,-1))).reshape((n,h*w,-1)))*10.0)  # 算二者之间的相似度。 32 x 32的矩阵。
         max_value = torch.max(sim,dim=-1)[0].mean()
         # print(sim)
-        print(max_value)
+        # print(max_value)
         x = torch.bmm(sim,Fe.reshape((n,self.in_channel1,-1)).permute(0,2,1)).permute(0,2,1).reshape((n,-1,h,w))  # 相似度 x p2的特征。把最相似的匹配上。 进行空间对齐。
         Fe = self.emb4(self.relu(self.emb3(x)))
         # Fe = x

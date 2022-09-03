@@ -31,7 +31,8 @@ import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from training.networks import Encoder
-
+import inspect
+import collections
 try:
     from tensorboardX import SummaryWriter
 except ImportError:
@@ -127,12 +128,12 @@ def cleanup():
 
 # --data=./output/car_dataset_3w_test/images --g_ckpt=car_model.pkl --outdir=../car_stylenrf_output/psp_case2/debug
 @click.command()
-@click.option("--data", type=str, default=None)
-@click.option("--g_ckpt", type=str, default=None)
+@click.option("--data", type=str, default='./output/create_dataset/car_dataset_trunc075/images')
+@click.option("--g_ckpt", type=str, default='./car_model.pkl')
 @click.option("--e_ckpt", type=str, default=None)
 @click.option("--max_steps", type=int, default=1000000)
 @click.option("--batch", type=int, default=4)
-@click.option("--lr", type=float, default=0.0001)
+@click.option("--lr", type=float, default=0.00001)
 @click.option("--local_rank", type=int, default=0)
 @click.option("--lambda_w", type=float, default=1.0)
 @click.option("--lambda_c", type=float, default=1.0)
@@ -141,9 +142,11 @@ def cleanup():
 @click.option("--which_c", type=str, default='c2')
 @click.option("--adv", type=float, default=0.05)
 @click.option("--tensorboard", type=bool, default=True)
-@click.option("--outdir", type=str, required=True)
+@click.option("--outdir", type=str, default='./output/psp_case2_encoder/debug')
 @click.option("--resume", type=bool, default=False)  # true则进行resume
-@click.option("--insert_layer", type=int, default=2)  # true则进行resume
+@click.option("--insert_layer", type=int, default=2)  #  在net中进行特征的时候在哪一层后面进行合并
+@click.option("--match", type=bool, default=False)  #  控制是否采用matchConv的合并实行，为0则 使用embeding的方式。
+@click.option("--in_net", type=bool, default=False)  #  控制合并位置是在net之前还是在net中间，为0则在net之前。
 # def main(data, outdir, g_ckpt, e_ckpt,
 #          max_steps, batch, lr, local_rank, lambda_w,
 #          lambda_img, adv, tensorboard):
@@ -156,9 +159,13 @@ def cleanup():
 
 def main(data, outdir, g_ckpt, e_ckpt,
              max_steps, batch, lr,local_rank, lambda_w,lambda_c,
-             lambda_img,lambda_l2, which_c,adv, tensorboard,resume,insert_layer):
+             lambda_img,lambda_l2, which_c,adv, tensorboard,resume,insert_layer,match,in_net):
     # local_rank = rank
     # setup(rank, word_size)
+    # options_list = click.option()
+    # print(options_list)
+
+
 
     random_seed = 22
     np.random.seed(random_seed)
@@ -208,19 +215,30 @@ def main(data, outdir, g_ckpt, e_ckpt,
     params = list(E.parameters())
     # if which_c=='c1':
     #     match_32 = G.synthesis.match_c1
-    #     match_64 = G.synthesis.U.match_c1
+        # match_64 = G.synthesis.U.match_c1
     # elif which_c=='c2':
     #     match_32 = G.synthesis.match_c2
-    #     match_64 = G.synthesis.U.match_c2
+        # match_64 = G.synthesis.U.match_c2
     # else:
     #     match_32 = G.synthesis.match_c3
         # match_64 = G.synthesis.U.match_c3
     # params += list(match_32.parameters())
     # params += list(match_64.parameters())
-    fg_emb = G.synthesis.fg_nerf.MatchConv_fg
-    bg_emb = G.synthesis.bg_nerf.MatchConv_bg
+    if match and in_net:
+        fg_emb = G.synthesis.fg_nerf.MatchConv_fg
+        bg_emb = G.synthesis.bg_nerf.MatchConv_bg
+    elif not match and in_net:
+        fg_emb = G.synthesis.fg_nerf.My_embedding_fg
+        bg_emb = G.synthesis.bg_nerf.My_embedding_bg
+    elif match and not in_net:
+        fg_emb = G.synthesis.fg_nerf.MatchConv
+        bg_emb = G.synthesis.bg_nerf.MatchConv
+    else:
+        fg_emb = G.synthesis.fg_nerf.My_embedding
+        bg_emb = G.synthesis.bg_nerf.My_embedding
     params+=list(fg_emb.parameters())
     params+=list(bg_emb.parameters())
+    # params+=list(synthesis.parameters())
     E_optim = optim.Adam(params, lr=lr, betas=(0.9, 0.99))
     scheduler = torch.optim.lr_scheduler.StepLR(E_optim, step_size=5000, gamma=0.1)
     requires_grad(E, True)
@@ -288,7 +306,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
         rec_ws_1, c1= E(img_1,which_c=which_c)
         # ws_avg = ws_avg.repeat(rec_ws_1.shape[0],1,1)  # zj 这个地方和之前得不一样，以前是不是也需要这样处理呢。
         rec_ws_1 +=ws_avg
-        gen_img1 = G.get_final_output(styles=rec_ws_1, camera_matrices=camera1,img_c=(which_c,c1,insert_layer))
+        gen_img1 = G.get_final_output(styles=rec_ws_1, camera_matrices=camera1,img_c=(which_c,c1,insert_layer,match,in_net))  #
 
         # define loss
         loss_dict['img1_lpips'] = loss_fn_alex(gen_img1.cpu(), img_1.cpu()).mean().to(device) * lambda_img
@@ -310,7 +328,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
             # logger.add_scalar('E_loss/l2', l2_loss_val, i)
             # logger.add_scalar('E_loss/adv', adv_loss_val, i)
 
-        if i % 200 == 0:
+        if i % 100 == 0:
             os.makedirs(f'{outdir}/sample', exist_ok=True)
             with torch.no_grad():
 
