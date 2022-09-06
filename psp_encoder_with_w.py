@@ -1,5 +1,3 @@
-#-*-coding:utf-8-*-
-#-*-coding:utf-8-*-
 
 #-*-coding:utf-8-*-
 
@@ -133,7 +131,7 @@ def cleanup():
 @click.option("--e_ckpt", type=str, default=None)
 @click.option("--max_steps", type=int, default=1000000)
 @click.option("--batch", type=int, default=4)
-@click.option("--lr", type=float, default=0.00001)
+@click.option("--lr", type=float, default=0.0001)
 @click.option("--local_rank", type=int, default=0)
 @click.option("--lambda_w", type=float, default=1.0)
 @click.option("--lambda_c", type=float, default=1.0)
@@ -142,7 +140,7 @@ def cleanup():
 @click.option("--which_c", type=str, default='c2')
 @click.option("--adv", type=float, default=0.05)
 @click.option("--tensorboard", type=bool, default=True)
-@click.option("--outdir", type=str, default='./output/psp_case2_encoder/debug')
+@click.option("--outdir", type=str, default='./output/psp_encoder_with_w/debug')
 @click.option("--resume", type=bool, default=False)  # true则进行resume
 @click.option("--insert_layer", type=int, default=2)  #  在net中进行特征的时候在哪一层后面进行合并
 @click.option("--match", type=bool, default=False)  #  控制是否采用matchConv的合并实行，为0则 使用embeding的方式。
@@ -309,6 +307,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
 
         # define loss
         loss_dict['img1_lpips'] = loss_fn_alex(gen_img1.cpu(), img_1.cpu()).mean().to(device) * lambda_img
+        loss_dict['loss_w'] = F.smooth_l1_loss(rec_ws_1, w).mean() *lambda_w
         # loss_dict['img1_l2'] = F.mse_loss(gen_img1, img_1) * lambda_l2
         # loss_dict['img2_l2'] = F.mse_loss(gen_img2, img_2) * lambda_l2
 

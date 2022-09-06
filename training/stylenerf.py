@@ -1112,7 +1112,7 @@ class VolumeRenderer(object):
                 img_c = None
                 # c_feature = c_feature*0.1
 
-            # img_c=None
+            img_c=None
             if not only_render_background:
                 output = self.forward_rendering(  # 前景
                     H, output, fg_nerf, nerf_input_cams, nerf_input_feats, latent_codes, styles,c_feature=img_c)
