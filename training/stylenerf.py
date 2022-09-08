@@ -370,11 +370,10 @@ class NeRFBlock(nn.Module):
 
         if c_feature is not None:
             _,c_feature,insert_layer,match,in_net = c_feature
-            c_feature = c_feature *0.1
             #  match   控制是否采用matchConv的合并实行，为0则 使用embeding的方式。
             #  in_net  控制合并位置是在net之前还是在net中间，为0则在net之前。
         else:
-            insert_layer=-1
+            insert_layer=-1 # 相当于这个值等于-1的时候，就不考虑加入C
             c_feature = None
 
 
@@ -414,7 +413,7 @@ class NeRFBlock(nn.Module):
                 if (self.skip_layer is not None) and (idx == self.skip_layer):
                     net = torch.cat([net, p], 1)
                 net = layer(net, ws_i, up=1)
-                if idx == insert_layer-1 and in_net: # insert_layer=2则在第二层之后
+                if idx == insert_layer-1 and in_net and c_feature is not None: # insert_layer=2则在第二层之后
                     if not match:
                         p = rearrange(net, '(b s) c h w -> b s c h w', s=n_steps)
                         c_feature = c_feature.unsqueeze(dim=1)
@@ -1111,8 +1110,6 @@ class VolumeRenderer(object):
             else:
                 img_c = None
                 # c_feature = c_feature*0.1
-
-            img_c=None
             if not only_render_background:
                 output = self.forward_rendering(  # 前景
                     H, output, fg_nerf, nerf_input_cams, nerf_input_feats, latent_codes, styles,c_feature=img_c)

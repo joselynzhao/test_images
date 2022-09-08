@@ -143,8 +143,8 @@ def cleanup():
 @click.option("--outdir", type=str, default='./output/psp_encoder_with_w/debug')
 @click.option("--resume", type=bool, default=False)  # true则进行resume
 @click.option("--insert_layer", type=int, default=2)  #  在net中进行特征的时候在哪一层后面进行合并
-@click.option("--match", type=bool, default=False)  #  控制是否采用matchConv的合并实行，为0则 使用embeding的方式。
-@click.option("--in_net", type=bool, default=False)  #  控制合并位置是在net之前还是在net中间，为0则在net之前。
+@click.option("--match", type=bool, default=True)  #  控制是否采用matchConv的合并实行，为0则 使用embeding的方式。
+@click.option("--in_net", type=bool, default=True)  #  控制合并位置是在net之前还是在net中间，为0则在net之前。
 # def main(data, outdir, g_ckpt, e_ckpt,
 #          max_steps, batch, lr, local_rank, lambda_w,
 #          lambda_img, adv, tensorboard):
@@ -303,12 +303,15 @@ def main(data, outdir, g_ckpt, e_ckpt,
 
         rec_ws_1, c1= E(img_1,which_c=which_c)
         rec_ws_1 +=ws_avg
-        gen_img1 = G.get_final_output(styles=rec_ws_1, camera_matrices=camera1,img_c=(which_c,c1,insert_layer,match,in_net))  #
+        if c1 is not None:
+            c1 = c1 * 0.1
+        img_c= which_c,c1,insert_layer,match,in_net
+        gen_img1 = G.get_final_output(styles=rec_ws_1, camera_matrices=camera1,img_c=img_c)  #
 
         # define loss
         loss_dict['img1_lpips'] = loss_fn_alex(gen_img1.cpu(), img_1.cpu()).mean().to(device) * lambda_img
-        loss_dict['loss_w'] = F.smooth_l1_loss(rec_ws_1, w).mean() *lambda_w
-        # loss_dict['img1_l2'] = F.mse_loss(gen_img1, img_1) * lambda_l2
+        # loss_dict['loss_w'] = F.smooth_l1_loss(rec_ws_1, w).mean() *lambda_w
+        loss_dict['img1_l2'] = F.mse_loss(gen_img1, img_1) * lambda_l2
         # loss_dict['img2_l2'] = F.mse_loss(gen_img2, img_2) * lambda_l2
 
 
@@ -326,7 +329,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
             # logger.add_scalar('E_loss/l2', l2_loss_val, i)
             # logger.add_scalar('E_loss/adv', adv_loss_val, i)
 
-        if i % 100 == 0:
+        if i % 1000 == 0:
             os.makedirs(f'{outdir}/sample', exist_ok=True)
             with torch.no_grad():
 
@@ -339,7 +342,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
                     range=(-1, 1),
                 )
 
-        if i % 1000 == 0:
+        if i % 10000== 0:
             os.makedirs(f'{outdir}/checkpoints', exist_ok=True)
             snapshot_pkl = os.path.join(f'{outdir}/checkpoints/', f'network-snapshot-{i // 1000:06d}.pkl')
             snapshot_data = {}  # dict(training_set_kwargs=dict(training_set_kwargs))
