@@ -1,4 +1,4 @@
-
+#-*-coding:utf-8-*-#-*-coding:utf-8-*-
 #-*-coding:utf-8-*-
 
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
@@ -29,6 +29,7 @@ import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from training.networks import Encoder
+from training.networks import super_Encoder
 import inspect
 import collections
 try:
@@ -137,15 +138,16 @@ def cleanup():
 @click.option("--lambda_c", type=float, default=1.0)
 @click.option("--lambda_img", type=float, default=1.0)
 @click.option("--lambda_l2", type=float, default=1.0)
+@click.option("--lambda_p", type=float, default=1.0)
 @click.option("--which_c", type=str, default='c2')
 @click.option("--adv", type=float, default=0.05)
 @click.option("--tensorboard", type=bool, default=True)
-@click.option("--outdir", type=str, default='./output/psp_encoder_with_w/debug')
+@click.option("--outdir", type=str, default='./output/case091301/debug')
 @click.option("--resume", type=bool, default=False)  # true则进行resume
 @click.option("--insert_layer", type=int, default=2)  #  在net中进行特征的时候在哪一层后面进行合并
 @click.option("--match", type=bool, default=True)  #  控制是否采用matchConv的合并实行，为0则 使用embeding的方式。
 @click.option("--in_net", type=bool, default=True)  #  控制合并位置是在net之前还是在net中间，为0则在net之前。
-@click.option("--which_encoder", type=str, default='psp')  #  选择使用哪个 encoder。
+@click.option("--balence", type=float, default=1)  #  控制合并位置是在net之前还是在net中间，为0则在net之前。
 # def main(data, outdir, g_ckpt, e_ckpt,
 #          max_steps, batch, lr, local_rank, lambda_w,
 #          lambda_img, adv, tensorboard):
@@ -158,7 +160,7 @@ def cleanup():
 
 def main(data, outdir, g_ckpt, e_ckpt,
              max_steps, batch, lr,local_rank, lambda_w,lambda_c,
-             lambda_img,lambda_l2, which_c,adv, tensorboard,resume,insert_layer,match,in_net,which_encoder):
+             lambda_img,lambda_l2, lambda_p,which_c,adv, tensorboard,resume,insert_layer,match,in_net,balence):
     # local_rank = rank
     # setup(rank, word_size)
     # options_list = click.option()
@@ -205,47 +207,42 @@ def main(data, outdir, g_ckpt, e_ckpt,
             network = legacy.load_network_pkl(fp)
             E = network['E'].requires_grad_(True).to(device)
     else:
-        if which_encoder =='psp':
-            from models.encoders.psp_encoders import GradualStyleEncoder1
-            E = GradualStyleEncoder1(50, 3, G.mapping.num_ws, 'ir_se').to(device)  # num_layers, input_nc, n_styles,mode='ir
-        else:
-            E = Encoder(G.img_resolution, G.mapping.num_ws, G.mapping.w_dim, add_dim=2).to(device)
-        # if num_gpus >1:
-        #    E = DDP(E, device_ids=[rank], output_device=rank, find_unused_parameters=True) # broadcast_buffers=False
+        E = super_Encoder(G.img_resolution,50,3,G.mapping.num_ws,G.mapping.w_dim,add_dim=2,mode='ir_se',balence=balence).to(device)
 
     # E_optim = optim.Adam(E.parameters(), lr=lr*0.1, betas=(0.9, 0.99))
     params = list(E.parameters())
-    # if which_c=='c1':
-    #     match_32 = G.synthesis.match_c1
+    if which_c=='c1':
+        match_32 = G.synthesis.match_c1
         # match_64 = G.synthesis.U.match_c1
-    # elif which_c=='c2':
-    #     match_32 = G.synthesis.match_c2
+    elif which_c=='c2':
+        match_32 = G.synthesis.match_c2
         # match_64 = G.synthesis.U.match_c2
-    # else:
-    #     match_32 = G.synthesis.match_c3
+    else:
+        match_32 = G.synthesis.match_c3
         # match_64 = G.synthesis.U.match_c3
     # params += list(match_32.parameters())
     # params += list(match_64.parameters())
-    if match and in_net:
-        fg_emb = G.synthesis.fg_nerf.MatchConv_fg
-        bg_emb = G.synthesis.bg_nerf.MatchConv_bg
-    elif not match and in_net:
-        fg_emb = G.synthesis.fg_nerf.My_embedding_fg
-        bg_emb = G.synthesis.bg_nerf.My_embedding_bg
-    elif match and not in_net:
-        fg_emb = G.synthesis.fg_nerf.MatchConv
-        bg_emb = G.synthesis.bg_nerf.MatchConv
-    else:
-        fg_emb = G.synthesis.fg_nerf.My_embedding
-        bg_emb = G.synthesis.bg_nerf.My_embedding
-    params+=list(fg_emb.parameters())
-    params+=list(bg_emb.parameters())
-    # params+=list(synthesis.parameters())
+    # if match and in_net:
+    #     fg_emb = G.synthesis.fg_nerf.MatchConv_fg
+    #     bg_emb = G.synthesis.bg_nerf.MatchConv_bg
+    # elif not match and in_net:
+    #     fg_emb = G.synthesis.fg_nerf.My_embedding_fg
+    #     bg_emb = G.synthesis.bg_nerf.My_embedding_bg
+    # elif match and not in_net:
+    #     fg_emb = G.synthesis.fg_nerf.MatchConv
+    #     bg_emb = G.synthesis.bg_nerf.MatchConv
+    # else:
+    #     fg_emb = G.synthesis.fg_nerf.My_embedding
+    #     bg_emb = G.synthesis.bg_nerf.My_embedding
+    # params+=list(fg_emb.parameters())
+    # params+=list(bg_emb.parameters())
+    params+=list(match_32.parameters())
     E_optim = optim.Adam(params, lr=lr, betas=(0.9, 0.99))
     scheduler = torch.optim.lr_scheduler.StepLR(E_optim, step_size=5000, gamma=0.1)
     requires_grad(E, True)
-    requires_grad(fg_emb, True)
-    requires_grad(bg_emb, True)
+    requires_grad(match_32, True)
+    # requires_grad(fg_emb, True)
+    # requires_grad(bg_emb, True)
 
 
     # load the dataset
@@ -305,21 +302,25 @@ def main(data, outdir, g_ckpt, e_ckpt,
         camera1 = get_camera_metrices(camera1)
         camera2 = get_camera_metrices(camera2)
 
-        if which_encoder =='psp':
-            rec_ws_1, c1= E(img_1,which_c=which_c)
-        else:
-            rec_ws_1, cm = E(img_1)
-            c1=None
-        rec_ws_1 +=ws_avg
-        if c1 is not None:
-            c1 = c1 * 0.1
-        img_c= which_c,c1,insert_layer,match,in_net
-        gen_img1 = G.get_final_output(styles=rec_ws_1, camera_matrices=camera1,img_c=img_c)  #
+        ws,c,cm = E(img_1, which_c)
+        ws +=ws_avg
+        camera_matrices = G.synthesis.get_camera(batch,device,mode = cm)
+
+        img_c1= which_c,c,insert_layer,match,in_net
+        # img_c2= which_c,c2,insert_layer,match,in_net
+        gen_img1, nerf_img  = G.get_final_output(styles=ws, camera_matrices=camera_matrices,img_c=img_c1)  #
+        # gen_img2, middle_img2  = G.get_final_output(styles=rec_ws_2, camera_matrices=camera2,img_c=img_c2)  #
 
         # define loss
         loss_dict['img1_lpips'] = loss_fn_alex(gen_img1.cpu(), img_1.cpu()).mean().to(device) * lambda_img
-        # loss_dict['loss_w'] = F.smooth_l1_loss(rec_ws_1, w).mean() *lambda_w
-        # loss_dict['img1_l2'] = F.mse_loss(gen_img1, img_1) * lambda_l2
+        # loss_dict['img2_lpips'] = loss_fn_alex(gen_img2.cpu(), img_2.cpu()).mean().to(device) * lambda_img
+        if lambda_p !=0:
+            loss_dict['loss_cm0'] = F.smooth_l1_loss(camera1[0], camera_matrices[0]).mean() *lambda_p
+            loss_dict['loss_cm1'] = F.smooth_l1_loss(camera1[1], camera_matrices[1]).mean() *lambda_p
+            loss_dict['loss_cm2'] = F.smooth_l1_loss(camera1[2], camera_matrices[2]).mean() *lambda_p
+        if lambda_w !=0:
+            loss_dict['loss_w'] = F.smooth_l1_loss(ws, w).mean() *lambda_w
+        # loss_dict['img_l2'] = F.mse_loss(middle_img1, middle_img2) * lambda_l2
         # loss_dict['img2_l2'] = F.mse_loss(gen_img2, img_2) * lambda_l2
 
 

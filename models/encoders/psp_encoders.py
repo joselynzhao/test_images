@@ -114,6 +114,9 @@ class GradualStyleEncoder1(Module):
         # 到此， latent (list:16), each [4,512]
         out = torch.stack(latents, dim=1)  # shape [4,16,512]
         which_C_list ={'c1':c1,'c2':c2,'c3':c3,'p1':p1,'p2':p2,'0':None}
+
+        # 想在这个地方增加pose的输出
+
         return out,which_C_list[which_c]
 
 class GradualStyleEncoder(Module):
