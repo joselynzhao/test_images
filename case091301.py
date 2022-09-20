@@ -308,7 +308,8 @@ def main(data, outdir, g_ckpt, e_ckpt,
 
         img_c1= which_c,c,insert_layer,match,in_net
         # img_c2= which_c,c2,insert_layer,match,in_net
-        gen_img1, nerf_img  = G.get_final_output(styles=ws, camera_matrices=camera_matrices,img_c=img_c1)  #
+        camera_into = camera1 if lambda_p==0 else camera_matrices
+        gen_img1, nerf_img  = G.get_final_output(styles=ws, camera_matrices=camera_into,img_c=img_c1)  #
         # gen_img2, middle_img2  = G.get_final_output(styles=rec_ws_2, camera_matrices=camera2,img_c=img_c2)  #
 
         # define loss
