@@ -142,7 +142,7 @@ def cleanup():
 @click.option("--which_c", type=str, default='c2')
 @click.option("--adv", type=float, default=0.05)
 @click.option("--tensorboard", type=bool, default=True)
-@click.option("--outdir", type=str, default='./output/psp_case2_encoder/c*0')
+@click.option("--outdir", type=str, default='./output/psp_case2_encoder/debug')
 @click.option("--resume", type=bool, default=False)  # true则进行resume
 @click.option("--insert_layer", type=int, default=2)  #  在net中进行特征的时候在哪一层后面进行合并
 @click.option("--match", type=bool, default=True)  #  控制是否采用matchConv的合并实行，为0则 使用embeding的方式。
@@ -305,9 +305,10 @@ def main(data, outdir, g_ckpt, e_ckpt,
 
         rec_ws_1, c1= E(img_1,which_c=which_c)
         rec_ws_1 +=ws_avg
-        # c1  = c1 * 0
-        c1 = None
-        gen_img1,nerf_img1 = G.get_final_output(styles=rec_ws_1, camera_matrices=camera1,img_c=(which_c,c1,insert_layer,match,in_net))  #
+        c1  = c1 * 0
+        # img_c  = which_c,c1,insert_layer,match,in_net
+        img_c = None
+        gen_img1,nerf_img1 = G.get_final_output(styles=rec_ws_1, camera_matrices=camera1,img_c=img_c)  #
 
         # define loss
         loss_dict['img1_lpips'] = loss_fn_alex(gen_img1.cpu(), img_1.cpu()).mean().to(device) * lambda_img
