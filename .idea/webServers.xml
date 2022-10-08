@@ -3,9 +3,9 @@
   <component name="WebServers">
     <option name="servers">
       <webServer id="42169628-ba2c-4db8-b20d-ce15415c289d" name="hpcl">
-        <fileTransfer accessType="SFTP" host="172.20.208.155" port="22" sshConfigId="ca67d700-c870-429c-8426-97343242e498" sshConfig="zhaojing">
+        <fileTransfer accessType="SFTP" host="202.197.9.252" port="2222" sshConfigId="ca67d700-c870-429c-8426-97343242e498" sshConfig="zhaojing@202.197.9.252:2222 password">
           <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>
         </fileTransfer>
       </webServer>
