@@ -245,7 +245,6 @@ def main(data, outdir, g_ckpt, e_ckpt,
     requires_grad(fg_emb, True)
     requires_grad(bg_emb, True)
 
-    # 测试
     # load the dataset
     # data_dir = os.path.join(data, 'images')
     training_set_kwargs = dict(class_name='training.dataset.ImageFolderDataset_psp_case1', path=data, use_labels=False, xflip=True)

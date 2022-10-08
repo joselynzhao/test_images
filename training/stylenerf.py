@@ -327,7 +327,8 @@ class NeRFBlock(nn.Module):
         return p_transformed
 
     def forward(self, p_in, ray_d, z_shape=None, z_app=None, ws=None, shape=None, requires_grad=False, impl=None,c_feature=None):
-        with torch.set_grad_enabled(self.training or self.use_sdf or requires_grad):
+        with torch.set_grad_enabled(True):
+        # with torch.set_grad_enabled(self.training or self.use_sdf or requires_grad):
             impl = 'mlp' if self.tcnn_backend else impl
             option, p_in = self.forward_inputs(p_in, shape=shape, impl=impl) # p_in的batch就不等于4了。
             if self.tcnn_backend:
@@ -406,25 +407,25 @@ class NeRFBlock(nn.Module):
             p = p.squeeze(-1).squeeze(-1)
 
         net = self.fc_in(p, ws[:, 0] if ws is not None else None)  # 64， 128，32，32
-        if in_net and c is not None:  # insert_layer=2则在第二层之后
-            if not match:
-                p = rearrange(net, '(b s) c h w -> b s c h w', s=n_steps)
-                c = c.unsqueeze(dim=1)
-                c = c.repeat(1, n_steps, 1, 1, 1)
-                p = torch.cat((p, c), 2)
-                p = rearrange(p, 'b s c h w -> (b s) c h w')
-                if n_steps == 4:  # 用来判断为bg net
-                    net = self.My_embedding_bg(p)
-                else:
-                    net = self.My_embedding_fg(p)
-            else:  # match
-                c = c.unsqueeze(dim=1)
-                c = c.repeat(1, n_steps, 1, 1, 1)
-                c = rearrange(c, 'b s c h w -> (b s) c h w')
-                if n_steps == 4:  # 用来判断为bg net
-                    net = self.MatchConv_bg(c, net)
-                else:
-                    net = self.MatchConv_fg(c, net)
+        # if in_net and c is not None:  # insert_layer=2则在第二层之后
+        #     if not match:
+        #         p = rearrange(net, '(b s) c h w -> b s c h w', s=n_steps)
+        #         c = c.unsqueeze(dim=1)
+        #         c = c.repeat(1, n_steps, 1, 1, 1)
+        #         p = torch.cat((p, c), 2)
+        #         p = rearrange(p, 'b s c h w -> (b s) c h w')
+        #         if n_steps == 4:  # 用来判断为bg net
+        #             net = self.My_embedding_bg(p)
+        #         else:
+        #             net = self.My_embedding_fg(p)
+        #     else:  # match
+        #         c = c.unsqueeze(dim=1)
+        #         c = c.repeat(1, n_steps, 1, 1, 1)
+        #         c = rearrange(c, 'b s c h w -> (b s) c h w')
+        #         if n_steps == 4:  # 用来判断为bg net
+        #             net = self.MatchConv_bg(c, net)
+        #         else:
+        #             net = self.MatchConv_fg(c, net)
 
         if self.n_blocks > 1:
             for idx, layer in enumerate(self.blocks):
@@ -432,25 +433,25 @@ class NeRFBlock(nn.Module):
                 if (self.skip_layer is not None) and (idx == self.skip_layer):
                     net = torch.cat([net, p], 1)
                 net = layer(net, ws_i, up=1)
-                # if idx == insert_layer-1 and in_net and c_feature is not None: # insert_layer=2则在第二层之后
-                #     if not match:
-                #         p = rearrange(net, '(b s) c h w -> b s c h w', s=n_steps)
-                #         c = c.unsqueeze(dim=1)
-                #         c = c.repeat(1, n_steps, 1, 1, 1)
-                #         p = torch.cat((p, c), 2)
-                #         p = rearrange(p, 'b s c h w -> (b s) c h w')
-                #         if n_steps == 4:  # 用来判断为bg net
-                #             net = self.My_embedding_bg(p)
-                #         else:
-                #             net = self.My_embedding_fg(p)
-                #     else: # match
-                #         c = c.unsqueeze(dim=1)
-                #         c = c.repeat(1, n_steps, 1, 1, 1)
-                #         c = rearrange(c,'b s c h w -> (b s) c h w')
-                #         if n_steps == 4: # 用来判断为bg net
-                #             net = self.MatchConv_bg(c, net)
-                #         else:
-                #             net = self.MatchConv_fg(c, net)
+                if idx == insert_layer-1 and in_net and c is not None: # insert_layer=2则在第二层之后
+                    if not match:
+                        p = rearrange(net, '(b s) c h w -> b s c h w', s=n_steps)
+                        c = c.unsqueeze(dim=1)
+                        c = c.repeat(1, n_steps, 1, 1, 1)
+                        p = torch.cat((p, c), 2)
+                        p = rearrange(p, 'b s c h w -> (b s) c h w')
+                        if n_steps == 4:  # 用来判断为bg net
+                            net = self.My_embedding_bg(p)
+                        else:
+                            net = self.My_embedding_fg(p)
+                    else: # match
+                        c = c.unsqueeze(dim=1)
+                        c = c.repeat(1, n_steps, 1, 1, 1)
+                        c = rearrange(c,'b s c h w -> (b s) c h w')
+                        if n_steps == 4: # 用来判断为bg net
+                            net = self.MatchConv_bg(c, net)
+                        else:
+                            net = self.MatchConv_fg(c, net)
 
 
 
@@ -1959,14 +1960,14 @@ class NeRFSynthesisNetwork(torch.nn.Module):
                 block_kwargs['img_nerf'] = img
 
         # # 在这个地方对image进行处理
-        if 'img_c' in block_kwargs:
-            c_name,c,_,_,_ = block_kwargs['img_c']
-            if c_name=='c1':
-                x = self.match_c1(c,x)
-            elif c_name =='c2':
-                x = self.match_c2(c, x)
-            else:
-                x = self.match_c3(c, x)
+        # if 'img_c' in block_kwargs:
+        #     c_name,c,_,_,_ = block_kwargs['img_c']
+        #     if c_name=='c1':
+        #         x = self.match_c1(c,x)
+        #     elif c_name =='c2':
+        #         x = self.match_c2(c, x)
+        #     else:
+        #         x = self.match_c3(c, x)
 
             # 让x 和c 之间相加，在c是c2的时候，二者同纬度,w 256,32,32
             # x = x+c
