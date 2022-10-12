@@ -1102,7 +1102,7 @@ class Generator(torch.nn.Module):
                 img_channels=img_channels,
                 **encoder_kwargs)
 
-    def forward(self, z=None, c=None, img_c=None, styles=None, truncation_psi=1, truncation_cutoff=None, img=None,
+    def forward(self, z=None, c=None, features=None, views=None,source_views = None, styles=None, truncation_psi=1, truncation_cutoff=None, img=None,
                 **synthesis_kwargs):
         if styles is None:
             assert z is not None
@@ -1116,8 +1116,10 @@ class Generator(torch.nn.Module):
                                   **synthesis_kwargs)
         else:
             ws = styles
-        if img_c is not None:
-            synthesis_kwargs['img_c'] = img_c
+        if features is not None: synthesis_kwargs['features'] = features
+        if views is not None: synthesis_kwargs['views'] = views
+        if source_views is not None: synthesis_kwargs['source_views'] = source_views
+
         img = self.synthesis(ws, **synthesis_kwargs)  # return a dict
         return img
 
