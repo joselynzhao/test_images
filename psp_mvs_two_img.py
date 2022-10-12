@@ -131,13 +131,13 @@ def cleanup():
 @click.option("--e_ckpt", type=str, default=None)
 @click.option("--max_steps", type=int, default=1000000)
 @click.option("--batch", type=int, default=4)
-@click.option("--lr", type=float, default=0.00001)
+@click.option("--lr", type=float, default=0.0001)
 @click.option("--local_rank", type=int, default=0)
 @click.option("--lambda_w", type=float, default=1.0)
 @click.option("--lambda_c", type=float, default=1.0)
 @click.option("--lambda_img", type=float, default=1.0)
 @click.option("--lambda_l2", type=float, default=1.0)
-@click.option("--which_c", type=str, default='c2')
+@click.option("--which_c", type=str, default='p2')
 @click.option("--adv", type=float, default=0.05)
 @click.option("--tensorboard", type=bool, default=True)
 @click.option("--outdir", type=str, default='./output/debug')
@@ -218,7 +218,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
     params+= list(fg_net.parameters())
     # params+= list(bg_net.parameters())
     E_optim = optim.Adam(params, lr=lr, betas=(0.9, 0.99))
-    scheduler = torch.optim.lr_scheduler.StepLR(E_optim, step_size=5000, gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.StepLR(E_optim, step_size=50000, gamma=0.1)
     requires_grad(E, True)
     requires_grad(fg_net, True)
     # requires_grad(bg_net, True)
@@ -286,6 +286,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
 
         rec_ws_1, c1= E(img_1,which_c=which_c)
         rec_ws_1 +=ws_avg
+        res_ws_1 = w
         c1  = c1*c_coef
         # img_c = None
         gen_img,_ = G.get_final_output(styles=rec_ws_1,features=c1,views = views,source_views=source_views)  #

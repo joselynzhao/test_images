@@ -274,7 +274,7 @@ class NeRFBlock(nn.Module):
             self.num_ws  = 0
             
         else:
-            self.My_embedding_fg = Embedding_handle(256,128)
+            self.My_embedding_fg = Embedding_handle(512,128)
             # self.My_embedding_bg = Embedding_handle(256,64)
             # self.My_embedding = Embedding_handle(dim_embed)
             # self.MatchConv_fg = MatchConv(256,128)
@@ -2491,8 +2491,8 @@ class CameraQueriedSampler(torch.utils.data.Sampler):
 class Embedding_handle(nn.Module):
     def __init__(self,in_chan,out_chan):
         super().__init__()
-        self.emb1 =nn.Conv2d(in_chan, out_chan, 1, bias=False)
-        self.emb2 =nn.Conv2d(out_chan, out_chan, 1, bias=False)
+        self.emb1 =nn.Conv2d(in_chan, int(in_chan/2), 1, bias=False)
+        self.emb2 =nn.Conv2d(int(in_chan/2), out_chan, 1, bias=False)
         self.relu = nn.ReLU()
         self.tanh = nn.Tanh()
         self.sig = nn.Sigmoid()
