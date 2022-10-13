@@ -289,7 +289,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
         res_ws_1 = w
         c1  = c1*c_coef
         # img_c = None
-        gen_img,_ = G.get_final_output(styles=rec_ws_1,features=c1,views = views,source_views=source_views)  #
+        gen_img,_ = G.get_final_output(styles=res_ws_1,features=c1,views = views,source_views=source_views)  #
 
         # define loss
         loss_dict['img1_lpips'] = loss_fn_alex(gen_img.cpu(), img_2.cpu()).mean().to(device) * lambda_img

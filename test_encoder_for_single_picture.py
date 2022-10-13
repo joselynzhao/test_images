@@ -13,6 +13,7 @@
 """Generate images using pretrained network pickle."""
 
 import os
+os.environ["CUDA_VISIBLE_DEVICES"]='4'
 import re
 import time
 import glob
@@ -63,10 +64,10 @@ os.environ['PYOPENGL_PLATFORM'] = 'egl'
 @click.option('--network', 'network_pkl', help='Network pickle filename', default='./car_model.pkl')
 @click.option('--encoder', 'encoder_pkl', help='Network pickle filename', default='./output/psp_case1/v4/checkpoints/network-snapshot-000015.pkl')
 @click.option('--img_dir', help='test image path', default='./output/create_dataset/test_dataset/trunc075')
-@click.option('--group_number',type=str, default='01')
+@click.option('--group_name',type=str, default='01')
 @click.option('--class', 'class_idx', type=int, help='Class label (unconditional if not specified)')
 @click.option('--outdir', help='Where to save the output images', type=str, metavar='DIR',
-              default='../output/test_encoders/unname')
+              default='../output/test_encoders/show_psp_case2_encoder_v4')
 def generate_images(
         ctx: click.Context,
         network_pkl: str,
@@ -74,7 +75,7 @@ def generate_images(
         img_dir: str,
         outdir: str,
         class_idx: Optional[int],
-        group_number:str
+        group_name:str
 ):
     device = torch.device('cuda')
     if os.path.isdir(network_pkl):
@@ -97,17 +98,20 @@ def generate_images(
         # './output/psp_case2/v31/checkpoints/network-snapshot-000079.pkl',
         # './output/psp_case2/v34/checkpoints/network-snapshot-000050.pkl',
         # './output/psp_case2/v34/checkpoints/network-snapshot-000079.pkl',
-        './output/psp_case2_encoder/v01/checkpoints/network-snapshot-000070.pkl',
-        './output/psp_case2_encoder/v02/checkpoints/network-snapshot-000070.pkl',
-        './output/psp_case2_encoder/v03/checkpoints/network-snapshot-000070.pkl',
-        './output/psp_case2_encoder/v04/checkpoints/network-snapshot-000070.pkl',
-        './output/psp_case2_encoder/v05/checkpoints/network-snapshot-000070.pkl',
+        # './output/psp_case2_encoder/v01/checkpoints/network-snapshot-000070.pkl',
+        # './output/psp_case2_encoder/v02/checkpoints/network-snapshot-000070.pkl',
+        # './output/psp_case2_encoder/v03/checkpoints/network-snapshot-000070.pkl',
+        # './output/psp_case2_encoder/v04/checkpoints/network-snapshot-000070.pkl',
+        # './output/psp_case2_encoder/v05/checkpoints/network-snapshot-000070.pkl',
+        './output/psp_mvs_one_img/v01/checkpoints/network-snapshot-000001.pkl',
+        # './output/psp_case2_encoder/v4/checkpoints/network-snapshot-000015.pkl'
+
     ]
-    need_c = [1, 1, 1, 1,1,1,1]
-    which_C_list = ['c2', 'c2','c2', 'c2','c2', 'c2','c2']
-    seed_list = [0,2,4, 8, 9, 11]
-    store_dir = os.path.join(f'./output/test_encoders/In_testset/Group_{group_number}')  # 用于服务器测试
-    # store_dir = os.path.join(f'../car_stylenrf_output/test_encoders/Group_{group_number}')
+    need_c = [1, 1, 1, 1,1,1,1]  # 标志是不是需要加入c_feature的模型
+    which_C_list = ['p2', 'c2','c2', 'c2','c2', 'c2','c2']  # 各个模型用的是哪一个c特征。
+    seed_list = [0,2,4, 8, 9, 11]  # 选的固定的几个测试图像
+    # store_dir = os.path.join(f'./output/test_encoders/In_testset/Group_{group_name}')  # 用于服务器测试
+    store_dir = os.path.join(f'./output/test_encoders/test_set/Group_{group_name}')
     os.makedirs(store_dir, exist_ok=True)
     # seed_list = [11]
 
@@ -182,6 +186,7 @@ def generate_images(
         cam_1s = torch.cat(cam_1s,0)
         cam_2s = torch.cat(cam_2s,0)
         camera_matrics = cam_0s,cam_1s,cam_2s,None
+        views = source_views = camera_matrics[2][:, :2]
 
         ws_avg = G.mapping.w_avg[None, None, :]
         out_images = []
@@ -196,7 +201,7 @@ def generate_images(
                 c = c.repeat(batch_size, 1, 1, 1)
                 rec_ws = rec_ws.repeat(batch_size, 1, 1)
                 rec_ws += ws_avg
-                gen_images = G.get_final_output(styles=rec_ws, camera_matrices=camera_matrics, img_c=(which_c,c))
+                gen_images,_ = G.get_final_output(styles=rec_ws,features=c,views = views,source_views=source_views)
             else:
                 output = E(image_input)
                 if isinstance(output, tuple):

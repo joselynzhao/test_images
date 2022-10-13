@@ -9,20 +9,6 @@
           </advancedOptions>
         </fileTransfer>
       </webServer>
-      <webServer id="2c270da0-7a3d-4b0d-9486-722a17618d26" name="JD" url="http://localhost">
-        <fileTransfer rootFolder="/public/data0/MULT/" accessType="SFTP" host="localhost" port="6000" sshConfigId="93ce9be3-93db-4e79-a5ad-8359c5a45e03" sshConfig="jdmult1002@localhost:6000 password">
-          <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
-          </advancedOptions>
-        </fileTransfer>
-      </webServer>
-      <webServer id="3feb67da-fdf0-42e1-a584-432ed398d259" name="JDT">
-        <fileTransfer accessType="SFTP" host="jdea-cq-jump.jd.com" port="80" sshConfigId="4ea79e58-832d-470b-9dd4-4c4558b36d55" sshConfig="zhaojing165@jdea-cq-jump.jd.com:80 password">
-          <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
-          </advancedOptions>
-        </fileTransfer>
-      </webServer>
     </option>
   </component>
 </project>

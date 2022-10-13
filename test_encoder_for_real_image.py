@@ -63,8 +63,8 @@ os.environ['PYOPENGL_PLATFORM'] = 'egl'
 @click.command()
 @click.pass_context
 @click.option('--network', 'network_pkl', help='Network pickle filename', default='./car_model.pkl')
-@click.option('--encoder', 'encoder_pkl', help='Network pickle filename', default='./output/psp_case3/v1/checkpoints/network-snapshot-000016.pkl')
-@click.option('--img_dir', help='test image path', default='./output/real_test_images1')
+@click.option('--encoder', 'encoder_pkl', help='Network pickle filename', default='./output/psp_case2_encoder/v4/checkpoints/network-snapshot-000010.pkl')
+@click.option('--img_dir', help='test image path', default='./real_test_images/real_test_images3')
 @click.option('--which_c', help='which_c', default='c2')
 @click.option('--class', 'class_idx', type=int, help='Class label (unconditional if not specified)')
 @click.option('--outdir', help='Where to save the output images', type=str, metavar='DIR',
@@ -81,7 +81,7 @@ def generate_images(
     device = torch.device('cuda')
     from training.networks import Generator
     from torch_utils import misc
-    need_c = 0
+    need_c = 1  # 注意这个参数 ， 在加入了C_feature的情况下，Generator也要从训练的模型里面提取。
     if not need_c:
         if os.path.isdir(network_pkl):
             network_pkl = sorted(glob.glob(network_pkl + '/*.pkl'))[-1]
@@ -107,13 +107,18 @@ def generate_images(
             encoder = legacy.load_network_pkl(f)
             E = encoder['E'].to(device)
             G = encoder['G'].to(device)
-            with torch.no_grad():
-                G2 = Generator(*G.init_args, **G.init_kwargs).to(device)
-                misc.copy_params_and_buffers(G, G2, require_all=False)
-            G = copy.deepcopy(G2).eval().requires_grad_(False).to(device)
+            # with torch.no_grad():
+            #     G2 = Generator(*G.init_args, **G.init_kwargs).to(device)
+            #     misc.copy_params_and_buffers(G, G2, require_all=False)
+            #     from models.encoders.psp_encoders import GradualStyleEncoder1
+            #     E2 = GradualStyleEncoder1(50, 3, G.mapping.num_ws, 'ir_se').to(device)
+            #     misc.copy_params_and_buffers(E, E2, require_all=False)
+            # G = copy.deepcopy(G2).eval().requires_grad_(False).to(device)
+            # E = copy.deepcopy(E2).eval().requires_grad_(False).to(device)
+
 
     # store_dir = encoder_pkl.split('/')[-1].split('.')[0]
-    store_dir = os.path.join('../car_stylenrf_output/test_encoders',img_dir.split('/')[-1])
+    store_dir = os.path.join('./output/test_encoders',img_dir.split('/')[-1])
     os.makedirs(store_dir, exist_ok=True)
 
     # Labels.
@@ -168,7 +173,7 @@ def generate_images(
     cam_0s = []
     cam_1s = []
     cam_2s = []
-    batch_size = 5
+    # batch_size = 5
     gen = G.synthesis
     for u in select_pose:
         cam_0,cam_1,cam_2,_ = gen.get_camera(batch_size=1, mode=[u, 0.5, 0.26], device=device)
@@ -200,11 +205,13 @@ def generate_images(
             rec_ws += ws_avg
             gen_images = G.get_final_output(styles=rec_ws, camera_matrices=camera_matrics)
         else:
-            rec_ws,c = E(images,which_c=which_c)
-            c = c.repeat(batch_size, 1, 1)
-            rec_ws = rec_ws.repeat(batch_size, 1, 1,1)
+            rec_ws,c = E(image,which_c=which_c)
+            c = c.repeat(batch_size, 1, 1,1)
+            rec_ws = rec_ws.repeat(batch_size, 1, 1)
             rec_ws += ws_avg
-            gen_images = G.get_final_output(styles=rec_ws, camera_matrices=camera_matrics,img_c=(which_c,c))
+            img_c = which_c, c, 2, 1,1
+            # img_c = which_c, c, insert_layer, match, in_net
+            gen_images,_ = G.get_final_output(styles=rec_ws, camera_matrices=camera_matrics,img_c=img_c)
         out_one = torch.cat([image,gen_images],0)
         images.append(out_one.detach())
     images = torch.cat(images,0)

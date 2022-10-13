@@ -139,5 +139,3 @@ cython_debug/
 /output/
 /car_model.pkl
 /real_test_images/
-/alexnet-owt-4df8aa71.pth
-/vgg16-397923af.pth

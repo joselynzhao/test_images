@@ -274,7 +274,8 @@ class NeRFBlock(nn.Module):
             self.num_ws  = 0
             
         else:
-            self.My_embedding_fg = Embedding_handle(512,128)
+            # self.My_embedding_fg = Embedding_handle(512,128)
+            self.My_embedding_fg = Style2Layer(512, 128, 0, activation=self.activation, magnitude_ema_beta=self.magnitude_ema_beta)
             # self.My_embedding_bg = Embedding_handle(256,64)
             # self.My_embedding = Embedding_handle(dim_embed)
             # self.MatchConv_fg = MatchConv(256,128)
@@ -326,7 +327,7 @@ class NeRFBlock(nn.Module):
             p_transformed = p
         return p_transformed
 
-    def forward(self, p_in, ray_d,H, z_shape=None,z_app=None,features=None,ws=None, shape=None, requires_grad=False,impl=None,camera_poses=None):
+    def forward(self, p_in, ray_d,H, z_shape=None,z_app=None,features=None,ws=None, shape=None, requires_grad=False,impl=None,camera_poses=None,**other_kwargs):
         with torch.set_grad_enabled(True):
         # with torch.set_grad_enabled(self.training or self.use_sdf or requires_grad):
             impl = 'mlp' if self.tcnn_backend else impl
@@ -339,7 +340,7 @@ class NeRFBlock(nn.Module):
                 sigma_raw = rearrange(sigma_raw, '(b s) d -> b s d', s=option[2]).to(p_in.dtype)
                 feat = rearrange(feat,  '(b s) d -> b s d', s=option[2]).to(p_in.dtype)
             else:
-                feat, sigma_raw = self.forward_nerf(option, p_in, ray_d=ray_d,z_shape=z_shape,z_app=z_app,H=H,ws=ws,features=features,camera_poses=camera_poses)
+                feat, sigma_raw = self.forward_nerf(option, p_in, ray_d=ray_d,z_shape=z_shape,z_app=z_app,H=H,ws=ws,features=features,camera_poses=camera_poses,**other_kwargs)
         return feat, sigma_raw  # 4,16384,259    .  4, 16384,1
 
     def forward_inputs(self, p_in, shape=None, impl=None):
@@ -395,7 +396,8 @@ class NeRFBlock(nn.Module):
         )
         return samples[:, :, :, 0]  # (B, C, N)
 
-    def forward_nerf(self, option, p_in, H= None,ray_d=None, ws=None, z_shape=None, z_app=None, features=None,camera_poses=None):  # zj: h中要包含矩阵信息
+    def forward_nerf(self, option, p_in, H= None,ray_d=None, ws=None, z_shape=None, z_app=None, features=None,camera_poses=None,insert_layer=None,**unused):  # zj: h中要包含矩阵信息
+        # feature   4，512，32，32
         height, width, n_steps, use_normal = option
         current_net= "fg_nerf" if n_steps==16 else "bg_nerf"
         if current_net=="fg_nerf":  # 只有前景网络需要。
@@ -404,9 +406,9 @@ class NeRFBlock(nn.Module):
             p_cam = transform_to_camera_space(p_world=xyz,world_mat=torch.inverse(H.source_camera_metrices[1]))  # 4,16384,3
             uv = camera_points_to_image(camera_points=p_cam,camera_mat=H.source_camera_metrices[0],invert=True) # # 4,16384,2
             uv = torch.clamp(uv,min=-1.0,max =1.0)
-            mapping_features = self.index(latent=features, uv=uv, image_size=width)  # 4, 256, 16384
-            features = rearrange(mapping_features, 'b c (h w s) -> (b s) c h w', w=width, h=height,
-                             s=n_steps)  # 64,256,32,32
+            mapping_features = self.index(latent=features, uv=uv, image_size=width)  # 4, 512, 16384
+            features_2 = rearrange(mapping_features, 'b c (h w s) -> (b s) c h w', w=width, h=height,
+                             s=n_steps)  # 64,512,32,32
 
         # forward nerf feature networks
         p = self.transform_points(p_in.permute(0,2,3,1))   # Bs,h,w,c  64,32,32,60
@@ -419,7 +421,7 @@ class NeRFBlock(nn.Module):
         if current_net == "fg_nerf":
             from torchvision.transforms import Resize
             resize = Resize(p.shape[-1])
-            features = resize(features)  # 调整维度相同  # 64,256,32,32
+            features_2 = resize(features_2)  # 调整维度相同  # 64,256,32,32
 
         if height == width == 1:  # MLP
             p = p.squeeze(-1).squeeze(-1)
@@ -428,18 +430,23 @@ class NeRFBlock(nn.Module):
         # or
         # net = p
 
+        # 对原始feature的处理
+        features = features.unsqueeze(1)
+        features = features.repeat(1,n_steps,1,1,1)
+        features = rearrange(features, "b s c h w -> (b s) c h w")
+
         if self.n_blocks > 1:
             for idx, layer in enumerate(self.blocks):
                 ws_i = ws[:, idx + 1] if ws is not None else None
                 if (self.skip_layer is not None) and (idx == self.skip_layer):
                     net = torch.cat([net, p], 1)
                 net = layer(net, ws_i, up=1)  # 保持 64，128，32，32
-                if idx ==3 and current_net=="fg_nerf": # 第二层之后
+                if idx ==insert_layer and current_net=="fg_nerf": # 第二层之后
                     # 对特征 进行卷积降低维度
-                    features = self.My_embedding_fg(features)
+                    features = self.My_embedding_fg(features) #or = features_2
                     # 操作之后，feature 和p一样的维度
-                    net = net *0   # net 特征为0
-                    net = net + features
+                    net = features
+                    # net = net + features
 
         # forward to get the final results
         w_idx = self.n_blocks  # fc_in, self.blocks
@@ -933,7 +940,7 @@ class VolumeRenderer(object):
         output.fg_depths   = (di, di_trs)
         return output
         
-    def forward_rendering(self, H, output, fg_nerf, nerf_input_cams, nerf_input_feats, features, camera_poses,styles):
+    def forward_rendering(self, H, output, fg_nerf, nerf_input_cams, nerf_input_feats, features, camera_poses,styles,**other_kwargs):
         pixels_world, camera_world, ray_vector = nerf_input_cams
         # z_shape_obj, z_app_obj = latent_codes[:2]
         height, width = dividable(H.n_points)
@@ -951,7 +958,7 @@ class VolumeRenderer(object):
         if nerf_input_feats is not None:
             p_i = self.I.query_input_features(p_i, nerf_input_feats, fg_shape, bound)
 
-        feat, sigma_raw = fg_nerf(p_i, r_i,H = H,ws=styles,shape=fg_shape,features= features,camera_poses=camera_poses)
+        feat, sigma_raw = fg_nerf(p_i, r_i,H = H,ws=styles,shape=fg_shape,features= features,camera_poses=camera_poses,**other_kwargs)
         feat = rearrange(feat, 'b (n s) d -> b n s d', s=H.n_steps)  # 4 1023 16 259
         sigma_raw = rearrange(sigma_raw.squeeze(-1), 'b (n s) -> b n s', s=H.n_steps)  #  4 1024 16
         sigma = self.get_density(sigma_raw, fg_nerf, training=H.training)      # #  4 1024 16
@@ -967,7 +974,7 @@ class VolumeRenderer(object):
             if nerf_input_feats is not None:
                 p_f = self.I.query_input_features(p_f, nerf_input_feats, fg_shape, bound)
 
-            feat_f, sigma_raw_f = fg_nerf(p_f, r_f, H = H,ws=styles,shape=fg_shape,features= features,camera_poses=camera_poses)
+            feat_f, sigma_raw_f = fg_nerf(p_f, r_f, H = H,ws=styles,shape=fg_shape,features= features,camera_poses=camera_poses,**other_kwargs)
             feat_f      = rearrange(feat_f, 'b (n s) d -> b n s d', s=H.n_steps)
             sigma_raw_f = rearrange(sigma_raw_f.squeeze(-1), 'b (n s) -> b n s', s=H.n_steps)
             sigma_f     = self.get_density(sigma_raw_f, fg_nerf, training=H.training)
@@ -1046,13 +1053,13 @@ class VolumeRenderer(object):
         alpha                  = 0,
         features = None,
         camera_poses = None,  #zj ：传递的是view的，相当于是目标视角。
-        **unused):
+        **other_kwargs):
 
         assert (latent_codes is not None) or (styles is not None)
         assert self.no_background or (nerf_input_feats is None), "input features do not support background field"
         
         # hyper-parameters for rendering
-        H      = EasyDict(**unused)# unused里面的东西全都放到了 H里面。source_camera_metrices, batch_size, theta
+        H      = EasyDict(**other_kwargs)# unused里面的东西全都放到了 H里面。source_camera_metrices, batch_size, theta
         output = EasyDict()
         output.reg_loss = EasyDict()
         output.feat = []
@@ -1115,7 +1122,7 @@ class VolumeRenderer(object):
             # standard volume rendering
             if not only_render_background:
                 output = self.forward_rendering(  # 前景
-                    H, output, fg_nerf, nerf_input_cams, nerf_input_feats,features,camera_poses,styles)   #　需要提前给ｉｍｇ＿ｃ赋值
+                    H, output, fg_nerf, nerf_input_cams, nerf_input_feats,features,camera_poses,styles,**other_kwargs)   #　需要提前给ｉｍｇ＿ｃ赋值
 
             # background rendering (NeRF++)
             if (not not_render_background) and (not self.no_background):
@@ -1695,9 +1702,9 @@ class NeRFSynthesisNetwork(torch.nn.Module):
         # ---------------------------------- Initialize Modules ---------------------------------------- -#
         # camera module
         self.C = CameraRay(camera_kwargs, **block_kwargs)
-        self.match_c1 = MatchConv(128,256)
-        self.match_c2 = MatchConv(256,256)
-        self.match_c3 = MatchConv(512,256)
+        # self.match_c1 = MatchConv(128,256)
+        # self.match_c2 = MatchConv(256,256)
+        # self.match_c3 = MatchConv(512,256)
 
         #
         # input encoding module
@@ -2498,8 +2505,9 @@ class Embedding_handle(nn.Module):
         self.sig = nn.Sigmoid()
     def forward(self, x):
         x = self.emb1(x)
-        x = self.emb2(x)
         x = self.relu(x)
+        x = self.emb2(x)
+        # x = self.relu(x)
         return x
 
 

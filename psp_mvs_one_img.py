@@ -5,6 +5,7 @@
 from random import random
 from dnnlib import camera
 import os
+# os.environ["CUDA_VISIBLE_DEVICES"]='5'
 import numpy as np
 import torch
 import copy
@@ -37,7 +38,7 @@ except ImportError:
 
 import lpips
 loss_fn_alex = lpips.LPIPS(net='alex') # best forward scores
-loss_fn_vgg = lpips.LPIPS(net='vgg') # closer to "traditional" perceptual loss, when used for optimization
+# loss_fn_vgg = lpips.LPIPS(net='vgg') # closer to "traditional" perceptual loss, when used for optimization
 
 def data_sampler(dataset, shuffle):
     if shuffle:
@@ -141,7 +142,7 @@ def cleanup():
 @click.option("--tensorboard", type=bool, default=True)
 @click.option("--outdir", type=str, default='./output/psp_mvs_one_img/debug')
 @click.option("--resume", type=bool, default=False)  # true则进行resume
-@click.option("--insert_layer", type=int, default=2)  #  在net中进行特征的时候在哪一层后面进行合并
+@click.option("--insert_layer", type=int, default=3)  #  在net中进行特征的时候在哪一层后面进行合并
 @click.option("--match", type=bool, default=True)  #  控制是否采用matchConv的合并实行，为0则 使用embeding的方式。
 @click.option("--in_net", type=bool, default=False)  #  控制合并位置是在net之前还是在net中间，为0则在net之前。
 @click.option("--c_coef", type=float, default=1.0)  #  C_feature 的系数
@@ -163,8 +164,6 @@ def main(data, outdir, g_ckpt, e_ckpt,
     # setup(rank, word_size)
     # options_list = click.option()
     # print(options_list)
-
-
 
     random_seed = 22
     np.random.seed(random_seed)
@@ -284,7 +283,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
         rec_ws_1= w  # 真实值
         c1  = c1*c_coef
         # img_c = None
-        gen_img1,nerf_img1 = G.get_final_output(styles=rec_ws_1,features=c1,views = views,source_views=source_views)  #
+        gen_img1,nerf_img1 = G.get_final_output(styles=rec_ws_1,features=c1,views = views,source_views=source_views,insert_layer=insert_layer)  #
 
         # define loss
         loss_dict['img1_lpips'] = loss_fn_alex(gen_img1.cpu(), img_1.cpu()).mean().to(device) * lambda_img
