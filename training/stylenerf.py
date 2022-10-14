@@ -396,44 +396,47 @@ class NeRFBlock(nn.Module):
         )
         return samples[:, :, :, 0]  # (B, C, N)
 
-    def forward_nerf(self, option, p_in, H= None,ray_d=None, ws=None, z_shape=None, z_app=None, features=None,camera_poses=None,insert_layer=None,**unused):  # zj: h中要包含矩阵信息
+    def forward_nerf(self, option, p_in, H= None,ray_d=None, ws=None, z_shape=None, z_app=None, features=None,camera_poses=None,insert_layer=None,input_image=None,**unused):  # zj: h中要包含矩阵信息
         # feature   4，512，32，32
+        print("insert_layer : ", insert_layer)
         height, width, n_steps, use_normal = option
-        current_net= "fg_nerf" if n_steps==16 else "bg_nerf"
-        if current_net=="fg_nerf":  # 只有前景网络需要。
-            xyz = rearrange(p_in,'(b s) d h w -> b (h w s) d',h=height,w=width, s=n_steps)
-            # fg: 4,16384,3  bg: 4, 4096,4
-            p_cam = transform_to_camera_space(p_world=xyz,world_mat=torch.inverse(H.source_camera_metrices[1]))  # 4,16384,3
-            uv = camera_points_to_image(camera_points=p_cam,camera_mat=H.source_camera_metrices[0],invert=True) # # 4,16384,2
-            uv = torch.clamp(uv,min=-1.0,max =1.0)
-            mapping_features = self.index(latent=features, uv=uv, image_size=width)  # 4, 512, 16384
-            features_2 = rearrange(mapping_features, 'b c (h w s) -> (b s) c h w', w=width, h=height,
-                             s=n_steps)  # 64,512,32,32
 
         # forward nerf feature networks
-        p = self.transform_points(p_in.permute(0,2,3,1))   # Bs,h,w,c  64,32,32,60
+        p = self.transform_points(p_in.permute(0, 2, 3, 1))  # Bs,h,w,c  64,32,32,60
         if (self.z_dim > 0) and (not self.disable_latents):
             assert (z_shape is not None) and (ws is None)
             z_shape = repeat(z_shape, 'b c -> (b s) h w c', h=height, w=width, s=n_steps)
             p = torch.cat([p, z_shape], -1)
-        p = p.permute(0,3,1,2)    # BS x C x H x W  64 60 32 32
+        p = p.permute(0, 3, 1, 2)  # BS x C x H x W  64 60 32 32
 
-        if current_net == "fg_nerf":
+
+        current_net= "fg_nerf" if features is not None else "bg_nerf"
+        if current_net=="fg_nerf":  # 只有前景网络需要。
+            xyz = rearrange(p_in,'(b s) d h w -> b (h w s) d',h=height,w=width, s=n_steps) # 中间的 hws 是世界坐标， 一个三维的立方体
+            # fg: 4,16384,3  bg: 4, 4096,4
+            p_cam = transform_to_camera_space(p_world=xyz,world_mat=torch.inverse(H.source_camera_metrices[1]))  # 4,16384,3   # 世界坐标转化为 相机坐标。
+            uv = camera_points_to_image(camera_points=p_cam,camera_mat=H.source_camera_metrices[0],invert=True) # # 4,16384,2  # 相机坐标转为图像坐标
+            uv = torch.clamp(uv,min=-1.0,max =1.0)
+            mapping_features = self.index(latent=features, uv=uv, image_size=width)  # 4, 512, 16384
+            # mapping_features_img = self.index(latent=input_image, uv=uv, image_size=width)
+            # mapping_features_img = rearrange(mapping_features_img,"b c (h w s) -> b s h w c", h=height,w=width)
+            # mapping_features_img=mapping_features_img.squeeze(-1)
+            # np.save("info.npy",mapping_features_img.detach().cpu().numpy())
+            trans_feature = rearrange(mapping_features, 'b c (h w s) -> (b s) c h w', w=width, h=height,
+                             s=n_steps)  # 64,512,32,32
             from torchvision.transforms import Resize
             resize = Resize(p.shape[-1])
-            features_2 = resize(features_2)  # 调整维度相同  # 64,256,32,32
+            trans_feature = resize(trans_feature)  # 调整维度相同  # 64,256,32,32
+
+            # 对原始feature的处理
+            features = features.unsqueeze(1)
+            features = features.repeat(1,n_steps,1,1,1)
+            features = rearrange(features, "b s c h w -> (b s) c h w")
 
         if height == width == 1:  # MLP
             p = p.squeeze(-1).squeeze(-1)
 
         net = self.fc_in(p, ws[:, 0] if ws is not None else None)  # 64， 128，32，32
-        # or
-        # net = p
-
-        # 对原始feature的处理
-        features = features.unsqueeze(1)
-        features = features.repeat(1,n_steps,1,1,1)
-        features = rearrange(features, "b s c h w -> (b s) c h w")
 
         if self.n_blocks > 1:
             for idx, layer in enumerate(self.blocks):
@@ -443,7 +446,7 @@ class NeRFBlock(nn.Module):
                 net = layer(net, ws_i, up=1)  # 保持 64，128，32，32
                 if idx ==insert_layer and current_net=="fg_nerf": # 第二层之后
                     # 对特征 进行卷积降低维度
-                    features = self.My_embedding_fg(features) #or = features_2
+                    features = self.My_embedding_fg(trans_feature) #or = features_2
                     # 操作之后，feature 和p一样的维度
                     net = features
                     # net = net + features
@@ -577,7 +580,7 @@ class CameraRay(object):
 
     def get_camera(self, batch_size, device, mode='random', fov=None, force_uniform=False):
         if fov is not None:
-            camera_matrix = get_camera_mat(fov)
+            camera_matrix = get_camera_mat(fov)   # 相机内参
         else:
             camera_matrix = self.camera_matrix
         camera_mat = camera_matrix.repeat(batch_size, 1, 1).to(device)
@@ -1004,7 +1007,7 @@ class VolumeRenderer(object):
         output.fg_depths   = (di, di_trs)
         return output
 
-    def forward_rendering_background(self, H, output, bg_nerf, nerf_input_cams,latent_codes, styles_bg,features=None):
+    def forward_rendering_background(self, H, output, bg_nerf, nerf_input_cams,latent_codes, styles_bg):
         pixels_world, camera_world, _ = nerf_input_cams
         z_shape_bg, z_app_bg = latent_codes[2:]
         height, width = dividable(H.n_points)
@@ -1019,7 +1022,7 @@ class VolumeRenderer(object):
             di = self.C.add_noise_to_interval(di)
         p_bg, r_bg = self.C.get_evaluation_points_bg(pixels_world, camera_world, -di)
 
-        feat, sigma_raw = bg_nerf(p_bg, r_bg,z_shape=z_shape_bg,z_app=z_app_bg,H = H, ws=styles_bg, shape=bg_shape,features=features)
+        feat, sigma_raw = bg_nerf(p_bg, r_bg,z_shape=z_shape_bg,z_app=z_app_bg,H = H, ws=styles_bg, shape=bg_shape)
         feat      = rearrange(feat, 'b (n s) d -> b n s d', s=H.n_bg_steps)
         sigma_raw = rearrange(sigma_raw.squeeze(-1), 'b (n s) -> b n s', s=H.n_bg_steps)
         sigma     = self.get_density(sigma_raw, bg_nerf, training=H.training)
@@ -1127,7 +1130,7 @@ class VolumeRenderer(object):
             # background rendering (NeRF++)
             if (not not_render_background) and (not self.no_background):
                 output = self.forward_rendering_background(  # 背景
-                    H, output, bg_nerf, nerf_input_cams, latent_codes,styles_bg,features)
+                    H, output, bg_nerf, nerf_input_cams,latent_codes,styles_bg)
                          
         if ('early' in render_option) and ('value' not in render_option):
             return self.gen_optional_output(
@@ -1693,6 +1696,7 @@ class NeRFSynthesisNetwork(torch.nn.Module):
         self.resolution_start = resolution_start if resolution_start is not None else resolution_vol
         self.img_resolution_log2 = int(np.log2(img_resolution))
         self.img_channels     = img_channels
+        self.insert_layer = -1
         
         # number of samples
         self.n_reg_samples = n_reg_samples
@@ -1821,12 +1825,18 @@ class NeRFSynthesisNetwork(torch.nn.Module):
             else:
                 self.steps = steps / 1000.0
 
-    def forward(self, ws, views=None, source_views=None, features=None,**block_kwargs):  # 此时 block_kwargs 为空。
+    def forward(self, ws, views=None, source_views=None, features=None,insert_layer=None,**block_kwargs):  # 此时 block_kwargs 为空。
         #zj1010: 需要增加features，views ，source_views)
         # 之前的方案是把feature放到了block_kwargs里面。
+
         block_ws, imgs, rand_imgs = [], [], []
         batch_size = block_kwargs['batch_size'] = ws.size(0)
         n_levels, end_l, _, target_res = self.get_current_resolution()
+        # zj: add insert_layer
+        if insert_layer is not None:
+            self.insert_layer = insert_layer
+        if "insert_layer" not in block_kwargs:
+            block_kwargs['insert_layer'] = self.insert_layer
 
         # cameras, background codes        
         if "camera_matrices" not in block_kwargs:

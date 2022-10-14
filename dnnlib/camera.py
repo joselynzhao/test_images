@@ -6,7 +6,6 @@ from numpy.lib.function_base import angle
 import torch
 import torch.nn.functional as F
 import math
-import random
 
 from scipy.spatial.transform import Rotation as Rot
 HUGE_NUMBER = 1e10
@@ -33,18 +32,9 @@ def get_camera_mat(fov=49.13, invert=True):
 def get_random_pose(range_u, range_v, range_radius, batch_size=32,
                     invert=False, gaussian=False, angular=False):
     loc, (u, v) = sample_on_sphere(range_u, range_v, size=(batch_size), gaussian=gaussian, angular=angular)
-    #radius = range_radius[0] + torch.rand(batch_size) * (range_radius[1] - range_radius[0])
-    m = torch.distributions.gamma.Gamma(9,2)
-    radius = range_radius[0] + (range_radius[1] - range_radius[0]) * torch.tensor([m.sample() for i in range(batch_size)])/15.0
+    radius = range_radius[0] + torch.rand(batch_size) * (range_radius[1] - range_radius[0])
     loc = loc * radius.unsqueeze(-1)
-    up = np.zeros((batch_size,3))
-    for i in range(batch_size):
-        pitch = np.random.normal(scale=0.33)
-        if np.random.normal(scale=0.33)>-0.2:
-            pitch = 0
-        up[i] = np.array([math.sin(pitch),0,math.cos(pitch)])
-    R = look_at(loc,up=up)
-#    R = look_at(loc) #9
+    R = look_at(loc)
     RT = torch.eye(4).reshape(1, 4, 4).repeat(batch_size, 1, 1)
     RT[:, :3, :3] = R
     RT[:, :3, -1] = loc
@@ -62,7 +52,7 @@ def get_random_pose(range_u, range_v, range_radius, batch_size=32,
 
 
 def get_camera_pose(range_u, range_v, range_r, val_u=0.5, val_v=0.5, val_r=0.5,
-                    batch_size=32, invert=False,  gaussian=False, angular=False):
+                    batch_size=32, invert=False,  gaussian=False, angular=False):  # 改成支持batch
     r0, rr = range_r[0], range_r[1] - range_r[0]
     r = r0 + val_r * rr
     if not gaussian:
@@ -75,10 +65,10 @@ def get_camera_pose(range_u, range_v, range_r, val_u=0.5, val_v=0.5, val_r=0.5,
         vu, vv = mean_u - range_u[0], mean_v - range_v[0]
         u = mean_u + vu * val_u
         v = mean_v + vv * val_v
-        
-    loc = to_sphere(u, v, angular)
+
+    loc = to_sphere(u,v, angular)
     loc = torch.tensor(loc).float()
-    #loc, _ = sample_on_sphere((u, u), (v, v), size=(batch_size), angular=angular)
+    #loc, _ = sample_on_sphere((u, u), (v, v), size=(batch_size), angular=angular) # updated by Gang Li.
     radius = torch.ones(batch_size) * r
     loc = loc * radius.unsqueeze(-1)
     R = look_at(loc)
@@ -94,7 +84,7 @@ def get_camera_pose(range_u, range_v, range_r, val_u=0.5, val_v=0.5, val_r=0.5,
 def get_camera_pose_v2(range_u, range_v, range_r, mode, invert=False, gaussian=False, angular=False):
     r0, rr = range_r[0], range_r[1] - range_r[0]
     val_u, val_v = mode[:,0], mode[:,1]
-    val_r = torch.ones_like(val_u) * 0.26
+    val_r = torch.ones_like(val_u) * 0.5 # updated by Gang Li. (0.5)
     if not gaussian:
         u0, ur = range_u[0], range_u[1] - range_u[0]
         v0, vr = range_v[0], range_v[1] - range_v[0]
@@ -105,6 +95,7 @@ def get_camera_pose_v2(range_u, range_v, range_r, mode, invert=False, gaussian=F
         vu, vv = mean_u - range_u[0], mean_v - range_v[0]
         u = mean_u + vu * val_u
         v = mean_v + vv * val_v
+    
     loc = to_sphere(u, v, angular)
     radius = r0 + val_r * rr
     loc = loc * radius.unsqueeze(-1)
@@ -134,37 +125,14 @@ def to_sphere(u, v, angular=False):
 
 def sample_on_sphere(range_u=(0, 1), range_v=(0, 1), size=(1,),
                      to_pytorch=True, gaussian=False, angular=False):
-#    if not gaussian:
-#        u = np.random.uniform(*range_u, size=size)
-#        v = np.random.uniform(*range_v, size=size)
-#    else:
-#        mean_u, mean_v = sum(range_u) / 2, sum(range_v) / 2
-#        var_u, var_v = mean_u - range_u[0], mean_v - range_v[0]
-#        u = np.random.normal(size=size) * var_u + mean_u
-#        v = np.random.normal(size=size) * var_v + mean_v
-    if True:
+    if not gaussian:
+        u = np.random.uniform(*range_u, size=size)
+        v = np.random.uniform(*range_v, size=size)
+    else:
         mean_u, mean_v = sum(range_u) / 2, sum(range_v) / 2
         var_u, var_v = mean_u - range_u[0], mean_v - range_v[0]
-        v = np.random.normal(scale=0.33, size=size) * var_v + mean_v
-        u = np.random.uniform(*range_u, size=size)
-#        u = np.random.normal(scale=0.33, size=size) * var_u/2 + range_u[0] + var_u*0.75
-        for i in range(size):
-#            if np.random.normal()>0:
-#                u[i] = mean_u*2-u[i]
-#            if np.random.normal()>1.5:
-#                u[i] = mean_u
-            #if False: #9
-            if np.random.normal()>1.5:   #7 10
-                a = random.randint(0,17)
-                if a<6:
-                    dd = 0
-                elif a<9:
-                    dd = np.pi*0.5
-                elif a<12:
-                    dd = -np.pi*0.5
-                else:
-                    dd = np.pi
-                u[i] = mean_u + dd
+        u = np.random.normal(size=size) * var_u + mean_u
+        v = np.random.normal(size=size) * var_v + mean_v
 
     sample = to_sphere(u, v, angular)
     if to_pytorch:
@@ -179,7 +147,7 @@ def look_at(eye, at=np.array([0, 0, 0]), up=np.array([0, 0, 1]), eps=1e-5,
     if not isinstance(eye, torch.Tensor):
         # this is the original code from GRAF
         at = at.astype(float).reshape(1, 3)
-        up = up.astype(float).reshape(-1, 3)
+        up = up.astype(float).reshape(1, 3)
         eye = eye.reshape(-1, 3)
         up = up.repeat(eye.shape[0] // up.shape[0], axis=0)
         eps = np.array([eps]).reshape(1, 1).repeat(up.shape[0], axis=0)
@@ -204,12 +172,10 @@ def look_at(eye, at=np.array([0, 0, 0]), up=np.array([0, 0, 1]), eps=1e-5,
             return x / l2
         
         at, up = torch.from_numpy(at).float().to(eye.device), torch.from_numpy(up).float().to(eye.device)
+        eye = eye.to(torch.float32)
         z_axis = normalize(eye - at[None, :])
-        if len(up.shape)==2:
-            x_axis = normalize(torch.cross(up.expand_as(z_axis), z_axis, dim=-1))
-        else:
-            x_axis = normalize(torch.cross(up[None,:].expand_as(z_axis), z_axis, dim=-1))
-
+        #print(eye)
+        x_axis = normalize(torch.cross(up[None,:].expand_as(z_axis), z_axis, dim=-1))
         y_axis = normalize(torch.cross(z_axis, x_axis, dim=-1))
         r_mat = torch.stack([x_axis, y_axis, z_axis], dim=-1)
 
@@ -358,7 +324,7 @@ def transform_to_camera_space(p_world, world_mat, camera_mat=None, scale_mat=Non
         world_mat (tensor): world matrix
         scale_mat (tensor): scale matrix
     '''
-    batch_size, n_p, _ = p_world.shape
+    batch_size, n_p, _ = p_world.shape  # zj: n_p =  (h w s),丢弃了维度
     device = p_world.device
 
     # Transform world points to homogen coordinates
@@ -375,7 +341,7 @@ def transform_to_camera_space(p_world, world_mat, camera_mat=None, scale_mat=Non
         p_cam = camera_mat @ world_mat @ scale_mat @ p_world
 
     # Transform points back to 3D coordinates
-    p_cam = p_cam[:, :3].permute(0, 2, 1)
+    p_cam = p_cam[:, :3].permute(0, 2, 1)  # 调换维度位置
     return p_cam
 
 
@@ -500,6 +466,7 @@ def camera_points_to_image(camera_points, camera_mat,
     assert use_absolute_depth and negative_depth
     pixels, p_depths = pixels[:, :2], pixels[:, 2:3]
     p_depths = -p_depths  # negative depth
+    
     pixels = pixels / p_depths
 
     pixels = pixels.permute(0, 2, 1)

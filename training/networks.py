@@ -1128,7 +1128,7 @@ class Generator(torch.nn.Module):
         if isinstance(img, list):
             return img[-1]
         elif isinstance(img, dict):
-            return img['img'], img['img_nerf']
+            return img['img']
         return img
 
 

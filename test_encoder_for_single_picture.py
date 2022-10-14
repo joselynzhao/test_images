@@ -13,7 +13,7 @@
 """Generate images using pretrained network pickle."""
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]='4'
+os.environ["CUDA_VISIBLE_DEVICES"]='7'
 import re
 import time
 import glob
@@ -103,7 +103,7 @@ def generate_images(
         # './output/psp_case2_encoder/v03/checkpoints/network-snapshot-000070.pkl',
         # './output/psp_case2_encoder/v04/checkpoints/network-snapshot-000070.pkl',
         # './output/psp_case2_encoder/v05/checkpoints/network-snapshot-000070.pkl',
-        './output/psp_mvs_one_img/v01/checkpoints/network-snapshot-000001.pkl',
+        './output/psp_mvs_one_img/v05/checkpoints/network-snapshot-000002.pkl',
         # './output/psp_case2_encoder/v4/checkpoints/network-snapshot-000015.pkl'
 
     ]

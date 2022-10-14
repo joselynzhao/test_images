@@ -207,7 +207,7 @@ def main(data, outdir, g_ckpt, e_ckpt,
             E = network['E'].requires_grad_(True).to(device)
     else:
         from models.encoders.psp_encoders import GradualStyleEncoder1
-        E = GradualStyleEncoder1(50, 3, G.mapping.num_ws, 'ir_se').to(device)  # num_layers, input_nc, n_styles,mode='ir
+        E = GradualStyleEncoder1(50, 3, G.mapping.num_ws, 'ir_se',which_c=which_c).to(device)  # num_layers, input_nc, n_styles,mode='ir
         # if num_gpus >1:
         #    E = DDP(E, device_ids=[rank], output_device=rank, find_unused_parameters=True) # broadcast_buffers=False
 

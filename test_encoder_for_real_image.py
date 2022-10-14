@@ -29,29 +29,10 @@ import imageio
 import legacy
 import cv2
 from renderer import Renderer
+from training.my_utils import *
 
 
 # ----------------------------------------------------------------------------
-
-def num_range(s: str) -> List[int]:
-    '''Accept either a comma separated list of numbers 'a,b,c' or a range 'a-c' and return as a list of ints.'''
-
-    range_re = re.compile(r'^(\d+)-(\d+)$')
-    m = range_re.match(s)
-    if m:
-        return list(range(int(m.group(1)), int(m.group(2)) + 1))
-    vals = s.split(',')
-    return [int(x) for x in vals]
-
-
-def stack_imgs(imgs):
-    img = torch.stack(imgs, dim=2)
-    return img.reshape(img.size(0) * img.size(1), img.size(2) * img.size(3), 3)
-
-
-def proc_img(img):
-    return (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8).cpu()
-
 
 
 
@@ -62,74 +43,58 @@ os.environ['PYOPENGL_PLATFORM'] = 'egl'
 # 无参数运行。
 @click.command()
 @click.pass_context
-@click.option('--network', 'network_pkl', help='Network pickle filename', default='./car_model.pkl')
-@click.option('--encoder', 'encoder_pkl', help='Network pickle filename', default='./output/psp_case2_encoder/v4/checkpoints/network-snapshot-000010.pkl')
+# @click.option('--network', 'network_pkl', help='Network pickle filename', default='./car_model.pkl')
+@click.option('--encoder', 'encoder_pkl', help='Network pickle filename', default='./output/psp_mvs_one_img/debug/checkpoints/network-snapshot-000000.pkl')
 @click.option('--img_dir', help='test image path', default='./real_test_images/real_test_images3')
-@click.option('--which_c', help='which_c', default='c2')
+# @click.option('--batch',type=int, default=5)
+# @click.option('--which_c', help='which_c', default='p2')
 @click.option('--class', 'class_idx', type=int, help='Class label (unconditional if not specified)')
-@click.option('--outdir', help='Where to save the output images', type=str, metavar='DIR',
-              default='real_test_images1')
+
+# @click.option('--outdir', help='Where to save the output images', type=str, metavar='DIR',
+#               default='real_test_images1')
 def generate_images(
         ctx: click.Context,
-        network_pkl: str,
         encoder_pkl: str,
         img_dir: str,
-        which_c:str,
-        outdir: str,
         class_idx: Optional[int],
 ):
+    local_rank = 0
+    random_seed = 22
+    np.random.seed(random_seed)
+
+    num_gpus = torch.cuda.device_count()  # 自动获取显卡数量
+    conv2d_gradfix.enabled = True  # Improves training speed.
     device = torch.device('cuda')
-    from training.networks import Generator
-    from torch_utils import misc
-    need_c = 1  # 注意这个参数 ， 在加入了C_feature的情况下，Generator也要从训练的模型里面提取。
-    if not need_c:
-        if os.path.isdir(network_pkl):
-            network_pkl = sorted(glob.glob(network_pkl + '/*.pkl'))[-1]
-        print('Loading networks from "%s"...' % network_pkl)
-        if os.path.isdir(encoder_pkl):
-            encoder_pkl = sorted(glob.glob(encoder_pkl + '/*.pkl'))[-1]
+    # batch = 4
+
+    with dnnlib.util.open_url(encoder_pkl) as f:
         print('Loading encoder from "%s"...' % encoder_pkl)
+        encoder = legacy.load_network_pkl(f)
+        E = encoder['E'].to(device)
+        G = encoder['G'].to(device)
 
-        with dnnlib.util.open_url(network_pkl) as f:
-            network = legacy.load_network_pkl(f)
-            G = network['G_ema'].to(device)  # type: ignore
-        with torch.no_grad():
-            G2 = Generator(*G.init_args, **G.init_kwargs).to(device)
-            misc.copy_params_and_buffers(G, G2, require_all=False)
-        G = copy.deepcopy(G2).eval().requires_grad_(False).to(device)
 
-        with dnnlib.util.open_url(encoder_pkl) as f:
-            encoder = legacy.load_network_pkl(f)
-            E = encoder['E'].to(device)
-    else: # need_c = 1 针对encoder返回ws 和c 的情况
-        with dnnlib.util.open_url(encoder_pkl) as f:
-            print('Loading encoder from "%s"...' % encoder_pkl)
-            encoder = legacy.load_network_pkl(f)
-            E = encoder['E'].to(device)
-            G = encoder['G'].to(device)
-            # with torch.no_grad():
-            #     G2 = Generator(*G.init_args, **G.init_kwargs).to(device)
-            #     misc.copy_params_and_buffers(G, G2, require_all=False)
-            #     from models.encoders.psp_encoders import GradualStyleEncoder1
-            #     E2 = GradualStyleEncoder1(50, 3, G.mapping.num_ws, 'ir_se').to(device)
-            #     misc.copy_params_and_buffers(E, E2, require_all=False)
-            # G = copy.deepcopy(G2).eval().requires_grad_(False).to(device)
-            # E = copy.deepcopy(E2).eval().requires_grad_(False).to(device)
+    # load the dataset
+    # data_dir = os.path.join(data, 'images')
+    # training_set_kwargs = dict(class_name='training.dataset.ImageFolderDataset_real_img', path=img_dir,
+    #                            use_labels=False,
+    #                            xflip=True)
+    # data_loader_kwargs = dict(pin_memory=True, num_workers=1, prefetch_factor=1)
+    # training_set = dnnlib.util.construct_class_by_name(**training_set_kwargs)
+    # training_set_sampler = misc.InfiniteSampler(dataset=training_set, rank=local_rank, num_replicas=num_gpus,
+    #                                             seed=random_seed)  # for now, single GPU first.
+    # training_set_iterator = torch.utils.data.DataLoader(dataset=training_set, sampler=training_set_sampler,
+    #                                                     batch_size=batch // num_gpus, **data_loader_kwargs)
+    # training_set_iterator = iter(training_set_iterator)
+    # print('Num images: ', len(training_set))
+    # print('Image shape:', training_set.image_shape)
 
 
     # store_dir = encoder_pkl.split('/')[-1].split('.')[0]
     store_dir = os.path.join('./output/test_encoders',img_dir.split('/')[-1])
     os.makedirs(store_dir, exist_ok=True)
 
-    # Labels.
-    label = torch.zeros([1, G.c_dim], device=device)
-    if G.c_dim != 0:
-        if class_idx is None:
-            ctx.fail('Must specify class label with --class when using a conditional network')
-        label[:, class_idx] = 1
-    else:
-        if class_idx is not None:
-            print('warn: --class=lbl ignored when running on an unconditional network')
+
 
     def get_test_image(image_path):
         image = np.array(PIL.Image.open(image_path))
@@ -194,24 +159,15 @@ def generate_images(
     for img in files:
         img_path = os.path.join(img_dir,img)
         image = get_test_image(img_path)
-        # 用单重图像作为输入计算ws，再repeat
-        if not need_c:
-            output = E(image)
-            if isinstance(output, tuple):
-                rec_ws, _ = output
-            else:
-                rec_ws = output
-            rec_ws = rec_ws.repeat(batch_size, 1, 1)
-            rec_ws += ws_avg
-            gen_images = G.get_final_output(styles=rec_ws, camera_matrices=camera_matrics)
-        else:
-            rec_ws,c = E(image,which_c=which_c)
-            c = c.repeat(batch_size, 1, 1,1)
-            rec_ws = rec_ws.repeat(batch_size, 1, 1)
-            rec_ws += ws_avg
-            img_c = which_c, c, 2, 1,1
-            # img_c = which_c, c, insert_layer, match, in_net
-            gen_images,_ = G.get_final_output(styles=rec_ws, camera_matrices=camera_matrics,img_c=img_c)
+        # 用单重图像作为输入计算ws，再repea
+
+        rec_ws,c = E(image)
+        c = c.repeat(batch_size, 1, 1,1)
+        rec_ws = rec_ws.repeat(batch_size, 1, 1)
+        rec_ws += ws_avg
+        # img_c = which_c, c, insert_layer, match, in_net
+        views = source_views = camera_matrics[2]#.to(torch.float32)
+        gen_images = G.get_final_output(styles=rec_ws,features=c, views=views, source_views=source_views)
         out_one = torch.cat([image,gen_images],0)
         images.append(out_one.detach())
     images = torch.cat(images,0)
@@ -234,3 +190,7 @@ def generate_images(
 
 if __name__ == "__main__":
     generate_images()  # pylint: disable=no-value-for-parameter
+
+
+# running orders
+# python3 test_encoder_for_real_iamge.py --encoder=./output/psp_mvs_one_image/debug/checkpoints/network-snapshot-000000.pkl

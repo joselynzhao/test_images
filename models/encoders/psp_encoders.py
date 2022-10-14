@@ -33,7 +33,7 @@ class GradualStyleBlock(Module):
 
 
 class GradualStyleEncoder1(Module):
-    def __init__(self, num_layers, input_nc, n_styles, mode='ir', opts=None):
+    def __init__(self, num_layers, input_nc, n_styles, mode='ir',which_c='p2',opts=None):
         super(GradualStyleEncoder1, self).__init__()
         assert num_layers in [50, 100, 152], 'num_layers should be 50,100, or 152'
         assert mode in ['ir', 'ir_se'], 'mode should be ir or ir_se'
@@ -45,6 +45,7 @@ class GradualStyleEncoder1(Module):
         self.input_layer = Sequential(Conv2d(input_nc, 64, (3, 3), 1, 1, bias=False),
                                       BatchNorm2d(64),
                                       PReLU(64))
+        self.which_c = which_c
         modules = []
         for block in blocks:
             for bottleneck in block:
@@ -87,7 +88,7 @@ class GradualStyleEncoder1(Module):
         _, _, H, W = y.size()
         return F.interpolate(x, size=(H, W), mode='bilinear', align_corners=True) + y
 
-    def forward(self, x,which_c='c2'):
+    def forward(self, x):
         x = self.input_layer(x)
 
         latents = []
@@ -116,8 +117,9 @@ class GradualStyleEncoder1(Module):
         which_C_list ={'c1':c1,'c2':c2,'c3':c3,'p1':p1,'p2':p2,'0':None}
 
         # 想在这个地方增加pose的输出
+        print("which_c in Encoder:", self.which_c)
 
-        return out,which_C_list[which_c]
+        return out,which_C_list[self.which_c]
 
 class GradualStyleEncoder(Module):
     def __init__(self, num_layers, input_nc, n_styles,mode='ir' ,opts=None):
