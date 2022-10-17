@@ -193,4 +193,5 @@ if __name__ == "__main__":
 
 
 # running orders
-# python3 test_encoder_for_real_iamge.py --encoder=./output/psp_mvs_one_image/debug/checkpoints/network-snapshot-000000.pkl
+# python3 test_encoder_for_real_image.py --img_dir=./real_test_images/real_test_images3 --encoder=./output/psp_mvs_one_img/debug/checkpoints/network-snapshot-000000.pkl
+# 输出目录：./output/test_encoder/$img_dir/$encoder_name

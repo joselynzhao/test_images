@@ -177,7 +177,7 @@ def main(outdir, g_ckpt, e_ckpt,
         w = w.to(device).to(torch.float32)
 
         camera1 = get_camera_metrices(camera1,device)
-        views = source_views = camera1[2][:,:2]  # first two
+        views = source_views = camera1[2] # first two
 
         rec_ws_1, c1= E(img_1)
         rec_ws_1 +=ws_avg

@@ -134,3 +134,6 @@ def generate_images(
 
 if __name__ == "__main__":
     generate_images()  # pylint: disable=no-value-for-parameter
+# running orders
+# python3 test_encoder_for_gen_image.py --encoder=./output/psp_mvs_one_img/debug/checkpoints/network-snapshot-000000.pkl --which_server=jdt
+# 输出目录：./output/test_encoder/trunc075/$encoder_name
