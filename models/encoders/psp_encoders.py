@@ -117,7 +117,7 @@ class GradualStyleEncoder1(Module):
         which_C_list ={'c1':c1,'c2':c2,'c3':c3,'p1':p1,'p2':p2,'0':None}
 
         # 想在这个地方增加pose的输出
-        print("which_c in Encoder:", self.which_c)
+        # print("which_c in Encoder:", self.which_c)
 
         return out,which_C_list[self.which_c]
 

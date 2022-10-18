@@ -51,8 +51,8 @@ data_path={
 @click.option("--g_ckpt", type=str, default='./car_model.pkl')
 @click.option("--which_server", type=str, default='jdt')
 @click.option("--e_ckpt", type=str, default=None)
-@click.option("--max_steps", type=int, default=1000000)
-@click.option("--batch", type=int, default=8)
+@click.option("--max_steps", type=int, default=100000)
+@click.option("--batch", type=int, default=4)
 @click.option("--lr", type=float, default=0.0001)
 @click.option("--local_rank", type=int, default=0)
 @click.option("--lambda_w", type=float, default=1.0)
@@ -65,16 +65,18 @@ data_path={
 @click.option("--outdir", type=str, default='./output/psp_mvs_one_img/debug')
 @click.option("--resume", type=bool, default=False)  # true则进行resume
 @click.option("--insert_layer", type=int, default=3)  #  在net中进行特征的时候在哪一层后面进行合并 stylenerf attr
+@click.option("--num_views", type=int, default=1)  #  在net中进行特征的时候在哪一层后面进行合并 stylenerf attr
+@click.option("--with_gt_w", type=bool, default=False)  #  在net中进行特征的时候在哪一层后面进行合并 stylenerf attr
 
 def main(outdir, g_ckpt, e_ckpt,
              max_steps, batch, lr,local_rank, lambda_w,lambda_c,
-             lambda_img,lambda_l2, which_c,adv, tensorboard,resume,insert_layer,which_server):
+             lambda_img,lambda_l2, which_c,adv, tensorboard,resume,insert_layer,which_server,num_views,with_gt_w):
     # local_rank = rank
     # setup(rank, word_size)
     # options_list = click.option()
     # print(options_list)
     data=data_path[which_server]
-    random_seed = 22
+    random_seed = 25
     np.random.seed(random_seed)
 
     num_gpus = torch.cuda.device_count()  # 自动获取显卡数量
@@ -169,24 +171,34 @@ def main(outdir, g_ckpt, e_ckpt,
 
         E_optim.zero_grad()  # zero-out gradients
         # get data infor
-        img_1,img_2,camera1,camera2,w = next(training_set_iterator)
+        source_img, target_img, source_camera, target_camera, w = next(training_set_iterator)
         # handle image
-        img_1 = img_1.to(device).to(torch.float32) / 127.5 - 1
+        # handle image
+        source_img = source_img.to(device).to(torch.float32) / 127.5 - 1
+        target_img = target_img.to(device).to(torch.float32) / 127.5 - 1
 
         # handle w  # 暂时用不到
         w = w.to(device).to(torch.float32)
 
-        camera1 = get_camera_metrices(camera1,device)
-        views = source_views = camera1[2] # first two
+        source_camera = get_camera_metrices(source_camera, device)
+        target_camera = get_camera_metrices(target_camera, device)
+        source_views = source_camera[2][:, :2]  # first two
+        target_views = target_camera[2][:, :2]  # first two
 
-        rec_ws_1, c1= E(img_1)
-        rec_ws_1 +=ws_avg
-        rec_ws_1= w  # 真实值
-        # img_c = None
-        gen_img1= G.get_final_output(styles=rec_ws_1,features=c1,views = views,source_views=source_views,insert_layer=insert_layer,input_image=img_1)  #
+        # testing the same views with following two lines code
+        if num_views==1:
+            target_views = source_views  # the same views
+            target_img = source_img
+
+        source_ws, source_feature = E(source_img)
+        source_ws +=ws_avg
+        if with_gt_w:
+            source_ws= w  # 真实值
+
+        gen_img= G.get_final_output(styles=source_ws,features=source_feature,views = target_views,source_views=source_views,insert_layer=insert_layer,input_image=source_img)  #
 
         # define loss
-        loss_dict['img1_lpips'] = loss_fn_alex(gen_img1.cpu(), img_1.cpu()).mean().to(device) * lambda_img
+        loss_dict['img1_lpips'] = loss_fn_alex(gen_img.cpu(), target_img.cpu()).mean().to(device) * lambda_img
         # loss_dict['img1_l2'] = F.mse_loss(gen_img1, img_1) * lambda_l2
         # loss_dict['img2_l2'] = F.mse_loss(gen_img2, img_2) * lambda_l2
 
@@ -208,8 +220,7 @@ def main(outdir, g_ckpt, e_ckpt,
         if i % 100 == 0:
             os.makedirs(f'{outdir}/sample', exist_ok=True)
             with torch.no_grad():
-
-                sample = torch.cat([img_1.detach(),gen_img1.detach()])
+                sample = torch.cat([source_img.detach(), target_img.detach(), gen_img.detach()])
                 utils.save_image(
                     sample,
                     f"{outdir}/sample/{str(i).zfill(6)}.png",

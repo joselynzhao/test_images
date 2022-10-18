@@ -84,7 +84,8 @@ def get_camera_pose(range_u, range_v, range_r, val_u=0.5, val_v=0.5, val_r=0.5,
 def get_camera_pose_v2(range_u, range_v, range_r, mode, invert=False, gaussian=False, angular=False):
     r0, rr = range_r[0], range_r[1] - range_r[0]
     val_u, val_v = mode[:,0], mode[:,1]
-    val_r = torch.ones_like(val_u) * 0.5 # updated by Gang Li. (0.5)
+    # val_r = torch.ones_like(val_u) * 0.5 # updated by Gang Li. (0.5)
+    val_r = torch.ones_like(val_u) * 0.26 # updated by Jing Zhao. (0.5)
     if not gaussian:
         u0, ur = range_u[0], range_u[1] - range_u[0]
         v0, vr = range_v[0], range_v[1] - range_v[0]

@@ -360,7 +360,6 @@ class NeRFBlock(nn.Module):
             p_in.requires_grad_(True)
         return (height, width, n_steps, use_normal), p_in
 
-    # zj: 1010
     def index(self, latent, uv, cam_z=None, image_size=(), z_bounds=None):
         """
         Get pixel-aligned image features at 2D image coordinates
@@ -377,7 +376,7 @@ class NeRFBlock(nn.Module):
         latent_scaling = latent_scaling / (latent_scaling - 1) * 2.0
         if uv.shape[0] == 1 and latent.shape[0] > 1:
             uv = uv.expand(latent.shape[0], -1, -1)
-
+            uv[:, :, :, 1] = uv[:, :, :, 1] * (-1)
             if len(image_size) > 0:
                 if len(image_size) == 1:
                     image_size = (image_size, image_size)
@@ -385,8 +384,7 @@ class NeRFBlock(nn.Module):
                 uv = uv * scale - 1.0
 
         uv = uv.unsqueeze(2)  # (B, N, 1, 2)
-        # uv[:,:,:,1]=uv[:,:,:,1]*(-1)
-        uv[:, :, :, 1] = uv[:, :, :, 0] * (-1)
+        uv[:, :, :, 1] = uv[:, :, :, 1] * (-1)
         samples = F.grid_sample(
             latent,
             uv,
@@ -398,8 +396,9 @@ class NeRFBlock(nn.Module):
 
     def forward_nerf(self, option, p_in, H= None,ray_d=None, ws=None, z_shape=None, z_app=None, features=None,camera_poses=None,insert_layer=None,input_image=None,**unused):  # zj: h中要包含矩阵信息
         # feature   4，512，32，32
-        print("insert_layer : ", insert_layer)
+        # print("insert_layer : ", insert_layer)
         height, width, n_steps, use_normal = option
+        source_img = input_image
 
         # forward nerf feature networks
         p = self.transform_points(p_in.permute(0, 2, 3, 1))  # Bs,h,w,c  64,32,32,60
@@ -412,26 +411,43 @@ class NeRFBlock(nn.Module):
 
         current_net= "fg_nerf" if features is not None else "bg_nerf"
         if current_net=="fg_nerf":  # 只有前景网络需要。
-            xyz = rearrange(p_in,'(b s) d h w -> b (h w s) d',h=height,w=width, s=n_steps) # 中间的 hws 是世界坐标， 一个三维的立方体
+            xyz = rearrange(p_in,'(b s) d h w -> b (h w s) d',h=height,w=width, s=n_steps) #
             # fg: 4,16384,3  bg: 4, 4096,4
             p_cam = transform_to_camera_space(p_world=xyz,world_mat=torch.inverse(H.source_camera_metrices[1]))  # 4,16384,3   # 世界坐标转化为 相机坐标。
             uv = camera_points_to_image(camera_points=p_cam,camera_mat=H.source_camera_metrices[0],invert=True) # # 4,16384,2  # 相机坐标转为图像坐标
-            uv = torch.clamp(uv,min=-1.0,max =1.0)
-            mapping_features = self.index(latent=features, uv=uv, image_size=width)  # 4, 512, 16384
-            # mapping_features_img = self.index(latent=input_image, uv=uv, image_size=width)
-            # mapping_features_img = rearrange(mapping_features_img,"b c (h w s) -> b s h w c", h=height,w=width)
-            # mapping_features_img=mapping_features_img.squeeze(-1)
-            # np.save("info.npy",mapping_features_img.detach().cpu().numpy())
-            trans_feature = rearrange(mapping_features, 'b c (h w s) -> (b s) c h w', w=width, h=height,
-                             s=n_steps)  # 64,512,32,32
+            # index 不能调用两次
+
+            ''' test source_img'''
+            # mapping_img = self.index(latent=source_img, uv=uv, image_size=256)
+            # import torch as th
+            # from PIL import Image
+            # print("source_image:", source_img.shape)
+            # print("mapping_image:", mapping_img.shape)
+            # mapping_img = rearrange(mapping_img, 'b c (h w s) -> s b c h w', w=width, h=height, s=n_steps)
+            # from torchvision.transforms import Resize
+            # resize = Resize(256)
+            # def show_images(batch: th.Tensor, name):
+            #     """ Display a batch of images inline. """
+            #     scaled = ((batch + 1)*127.5).round().clamp(0,255).to(th.uint8).cpu()
+            #     reshaped = scaled.permute(2, 0, 3, 1).reshape([batch.shape[2], -1, 3])
+            #     img = Image.fromarray(reshaped.numpy())
+            #     img.save(name)
+            #     return name
+            # print("mapping_image:", mapping_img.shape)
+            # show_images(source_img, './tmp.png')
+            # for i in range(16):
+            #     show_images(resize(mapping_img[i]),'./tmp'+str(i)+'.png')
+            ''' use features'''
+            mapping_features = self.index(latent=features, uv=uv, image_size=256)
+            trans_feature = rearrange(mapping_features, 'b c (h w s) -> (b s) c h w', w=width, h=height, s=n_steps)  # 64,512,32,32
             from torchvision.transforms import Resize
             resize = Resize(p.shape[-1])
             trans_feature = resize(trans_feature)  # 调整维度相同  # 64,256,32,32
 
             # 对原始feature的处理
-            features = features.unsqueeze(1)
-            features = features.repeat(1,n_steps,1,1,1)
-            features = rearrange(features, "b s c h w -> (b s) c h w")
+            # features = features.unsqueeze(1)
+            # features = features.repeat(1,n_steps,1,1,1)
+            # features = rearrange(features, "b s c h w -> (b s) c h w")
 
         if height == width == 1:  # MLP
             p = p.squeeze(-1).squeeze(-1)
@@ -1859,6 +1875,8 @@ class NeRFSynthesisNetwork(torch.nn.Module):
                     # zj: 程序执行这里
                     block_kwargs["camera_matrices"] = self.get_camera(batch_size, device=ws.device,mode=views)
                     block_kwargs["source_camera_metrices"] = self.get_camera(batch_size, device=ws.device,mode = source_views)
+                    # print("block_kwargs[camera_matrices]", block_kwargs["camera_matrices"][2])
+                    # print("block_kwargs[source_camera_metrices]",block_kwargs["source_camera_metrices"][2])
 
             if ('camera_RT' in block_kwargs) or ('camera_UV' in block_kwargs):
                 camera_matrices = list(block_kwargs["camera_matrices"])
