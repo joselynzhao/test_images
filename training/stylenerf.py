@@ -394,11 +394,11 @@ class NeRFBlock(nn.Module):
         )
         return samples[:, :, :, 0]  # (B, C, N)
 
-    def forward_nerf(self, option, p_in, H= None,ray_d=None, ws=None, z_shape=None, z_app=None, features=None,camera_poses=None,insert_layer=None,input_image=None,**unused):  # zj: h中要包含矩阵信息
+    def forward_nerf(self, option, p_in, H= None,ray_d=None, ws=None, z_shape=None, z_app=None, features=None,camera_poses=None,insert_layer=None,**unused):  # zj: h中要包含矩阵信息
         # feature   4，512，32，32
         # print("insert_layer : ", insert_layer)
         height, width, n_steps, use_normal = option
-        source_img = input_image
+        with_net_fea = H.with_net_fea
 
         # forward nerf feature networks
         p = self.transform_points(p_in.permute(0, 2, 3, 1))  # Bs,h,w,c  64,32,32,60
@@ -414,10 +414,13 @@ class NeRFBlock(nn.Module):
             xyz = rearrange(p_in,'(b s) d h w -> b (h w s) d',h=height,w=width, s=n_steps) #
             # fg: 4,16384,3  bg: 4, 4096,4
             p_cam = transform_to_camera_space(p_world=xyz,world_mat=torch.inverse(H.source_camera_metrices[1]))  # 4,16384,3   # 世界坐标转化为 相机坐标。
+            # p_cam = transform_to_camera_space(p_world=xyz,world_mat=H.source_camera_metrices[1])  # 4,16384,3   # 世界坐标转化为 相机坐标。
             uv = camera_points_to_image(camera_points=p_cam,camera_mat=H.source_camera_metrices[0],invert=True) # # 4,16384,2  # 相机坐标转为图像坐标
+            # uv = camera_points_to_image(camera_points=p_cam,camera_mat=H.source_camera_metrices[0],invert=False) # # 4,16384,2  # 相机坐标转为图像坐标
             # index 不能调用两次
 
             ''' test source_img'''
+            # source_img = H.input_image
             # mapping_img = self.index(latent=source_img, uv=uv, image_size=256)
             # import torch as th
             # from PIL import Image
@@ -435,10 +438,11 @@ class NeRFBlock(nn.Module):
             #     return name
             # print("mapping_image:", mapping_img.shape)
             # show_images(source_img, './tmp.png')
-            # for i in range(16):
+            # for i in range(n_steps):
             #     show_images(resize(mapping_img[i]),'./tmp'+str(i)+'.png')
+
             ''' use features'''
-            mapping_features = self.index(latent=features, uv=uv, image_size=256)
+            mapping_features = self.index(latent=features, uv=uv, image_size=width)
             trans_feature = rearrange(mapping_features, 'b c (h w s) -> (b s) c h w', w=width, h=height, s=n_steps)  # 64,512,32,32
             from torchvision.transforms import Resize
             resize = Resize(p.shape[-1])
@@ -464,8 +468,8 @@ class NeRFBlock(nn.Module):
                     # 对特征 进行卷积降低维度
                     features = self.My_embedding_fg(trans_feature) #or = features_2
                     # 操作之后，feature 和p一样的维度
-                    net = features
-                    # net = net + features
+
+                    net = net + features if with_net_fea else features
 
         # forward to get the final results
         w_idx = self.n_blocks  # fc_in, self.blocks

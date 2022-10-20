@@ -5,7 +5,7 @@
 from random import random
 from dnnlib import camera
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"]='6'
+# os.environ["CUDA_VISIBLE_DEVICES"]='4'
 import numpy as np
 import torch
 import copy
@@ -51,7 +51,7 @@ data_path={
 @click.option("--g_ckpt", type=str, default='./car_model.pkl')
 @click.option("--which_server", type=str, default='jdt')
 @click.option("--e_ckpt", type=str, default=None)
-@click.option("--max_steps", type=int, default=100000)
+@click.option("--max_steps", type=int, default=10000)
 @click.option("--batch", type=int, default=4)
 @click.option("--lr", type=float, default=0.0001)
 @click.option("--local_rank", type=int, default=0)
@@ -65,12 +65,13 @@ data_path={
 @click.option("--outdir", type=str, default='./output/psp_mvs_one_img/debug')
 @click.option("--resume", type=bool, default=False)  # true则进行resume
 @click.option("--insert_layer", type=int, default=3)  #  在net中进行特征的时候在哪一层后面进行合并 stylenerf attr
-@click.option("--num_views", type=int, default=1)  #  在net中进行特征的时候在哪一层后面进行合并 stylenerf attr
-@click.option("--with_gt_w", type=bool, default=False)  #  在net中进行特征的时候在哪一层后面进行合并 stylenerf attr
+@click.option("--num_views", type=int, default=2)  #
+@click.option("--with_gt_w", type=bool, default=True)  #
+@click.option("--with_net_fea", type=bool, default=False)  #
 
 def main(outdir, g_ckpt, e_ckpt,
              max_steps, batch, lr,local_rank, lambda_w,lambda_c,
-             lambda_img,lambda_l2, which_c,adv, tensorboard,resume,insert_layer,which_server,num_views,with_gt_w):
+             lambda_img,lambda_l2, which_c,adv, tensorboard,resume,insert_layer,which_server,num_views,with_gt_w,with_net_fea):
     # local_rank = rank
     # setup(rank, word_size)
     # options_list = click.option()
@@ -138,6 +139,7 @@ def main(outdir, g_ckpt, e_ckpt,
 
     # load the dataset
     # data_dir = os.path.join(data, 'images')
+    from torch_utils import misc
     training_set_kwargs = dict(class_name='training.dataset.ImageFolderDataset_psp_case1', path=data, use_labels=False, xflip=True)
     data_loader_kwargs  = dict(pin_memory=True, num_workers=1, prefetch_factor=1)
     training_set = dnnlib.util.construct_class_by_name(**training_set_kwargs)
@@ -190,12 +192,13 @@ def main(outdir, g_ckpt, e_ckpt,
             target_views = source_views  # the same views
             target_img = source_img
 
+        # print(source_views)
+        # print(target_views)
         source_ws, source_feature = E(source_img)
-        source_ws +=ws_avg
         if with_gt_w:
             source_ws= w  # 真实值
-
-        gen_img= G.get_final_output(styles=source_ws,features=source_feature,views = target_views,source_views=source_views,insert_layer=insert_layer,input_image=source_img)  #
+        source_ws += ws_avg
+        gen_img= G.get_final_output(styles=source_ws,features=source_feature,views = target_views,source_views=source_views,insert_layer=insert_layer,input_image=source_img,with_net_fea=with_net_fea)  #
 
         # define loss
         loss_dict['img1_lpips'] = loss_fn_alex(gen_img.cpu(), target_img.cpu()).mean().to(device) * lambda_img
@@ -224,6 +227,7 @@ def main(outdir, g_ckpt, e_ckpt,
                 utils.save_image(
                     sample,
                     f"{outdir}/sample/{str(i).zfill(6)}.png",
+                    # f"./tmp_{str(i).zfill(6)}.png",
                     nrow=int(batch),
                     normalize=True,
                     range=(-1, 1),
@@ -243,7 +247,7 @@ def main(outdir, g_ckpt, e_ckpt,
             # snapshot_data2['G'] = G  # 需要把G保存下来
             with open(snapshot_pkl, 'wb') as f:
                 pickle.dump(snapshot_data, f)
-
+    logger.close()
     # cleanup()
 
 

@@ -74,22 +74,6 @@ def generate_images(
         G = encoder['G'].to(device)
 
 
-    # load the dataset
-    # data_dir = os.path.join(data, 'images')
-    # training_set_kwargs = dict(class_name='training.dataset.ImageFolderDataset_real_img', path=img_dir,
-    #                            use_labels=False,
-    #                            xflip=True)
-    # data_loader_kwargs = dict(pin_memory=True, num_workers=1, prefetch_factor=1)
-    # training_set = dnnlib.util.construct_class_by_name(**training_set_kwargs)
-    # training_set_sampler = misc.InfiniteSampler(dataset=training_set, rank=local_rank, num_replicas=num_gpus,
-    #                                             seed=random_seed)  # for now, single GPU first.
-    # training_set_iterator = torch.utils.data.DataLoader(dataset=training_set, sampler=training_set_sampler,
-    #                                                     batch_size=batch // num_gpus, **data_loader_kwargs)
-    # training_set_iterator = iter(training_set_iterator)
-    # print('Num images: ', len(training_set))
-    # print('Image shape:', training_set.image_shape)
-
-
     # store_dir = encoder_pkl.split('/')[-1].split('.')[0]
     store_dir = os.path.join('./output/test_encoders',img_dir.split('/')[-1])
     os.makedirs(store_dir, exist_ok=True)
